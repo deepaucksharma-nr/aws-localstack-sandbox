@@ -3,21 +3,17 @@ version: '3.8'
 services:
   # LocalStack for AWS services simulation
   localstack:
-    image: localstack/localstack:latest
+    image: localstack/localstack:${LOCALSTACK_VERSION:-3.0}  # Using stable version compatible with Community Edition
     container_name: localstack
     ports:
       - "4566:4566"              # LocalStack Gateway
-      - "4571:4571"              # Elasticsearch
     environment:
       - SERVICES=ec2,sts,iam,ssm,secretsmanager
       - DEBUG=1
       - DATA_DIR=/tmp/localstack/data
-      - LAMBDA_EXECUTOR=docker
-      - DOCKER_HOST=unix:///var/run/docker.sock
       - AWS_DEFAULT_REGION=us-east-1
     volumes:
       - "${TMPDIR:-/tmp}/localstack:/tmp/localstack"
-      - "/var/run/docker.sock:/var/run/docker.sock"
       - "./localstack/init-aws.sh:/docker-entrypoint-initaws.d/init-aws.sh"
     networks:
       - monitoring-network

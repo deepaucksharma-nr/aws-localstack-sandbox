@@ -70,12 +70,98 @@ resource "aws_security_group" "monitoring" {
   }
 }
 
+# IAM role for monitoring instance
+resource "aws_iam_role" "monitoring" {
+  name = "${var.monitoring_server_name}-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name = "${var.monitoring_server_name}-role"
+  }
+}
+
+# IAM policy for accessing secrets and parameters
+resource "aws_iam_role_policy" "monitoring_secrets" {
+  name = "${var.monitoring_server_name}-secrets-policy"
+  role = aws_iam_role.monitoring.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = [
+              "secretsmanager.${var.aws_region}.amazonaws.com",
+              "ssm.${var.aws_region}.amazonaws.com"
+            ]
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Attach CloudWatch policy for monitoring
+resource "aws_iam_role_policy_attachment" "monitoring_cloudwatch" {
+  role       = aws_iam_role.monitoring.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+# Attach SSM policy for session manager access
+resource "aws_iam_role_policy_attachment" "monitoring_ssm" {
+  role       = aws_iam_role.monitoring.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# Instance profile
+resource "aws_iam_instance_profile" "monitoring" {
+  name = "${var.monitoring_server_name}-profile"
+  role = aws_iam_role.monitoring.name
+}
+
 resource "aws_instance" "monitoring" {
   ami                    = var.ami_id != "" ? var.ami_id : data.aws_ami.amazon_linux_2[0].id
   instance_type          = var.instance_type
   key_name              = var.key_name
   vpc_security_group_ids = [aws_security_group.monitoring.id]
   subnet_id              = local.subnet_id
+  iam_instance_profile   = aws_iam_instance_profile.monitoring.name
 
   root_block_device {
     volume_type = "gp3"
@@ -92,6 +178,12 @@ resource "aws_instance" "monitoring" {
     #!/bin/bash
     yum update -y
     yum install -y python3 python3-pip
-    pip3 install ansible
+    pip3 install ansible boto3
+    
+    # Install AWS CLI v2
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    unzip awscliv2.zip
+    ./aws/install
+    rm -rf awscliv2.zip aws/
   EOF
 }

@@ -1,168 +1,110 @@
-# Architecture Documentation
+# Architecture
 
-## System Architecture Overview
+How this thing works.
 
-This reference implementation follows a modular, cloud-native architecture designed for scalability, security, and maintainability.
-
-```
-
-┌─────────────────────────────────┴───────────────────────────────────────┐
-│                          Monitoring Infrastructure                        │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    EC2 Monitoring Instance                       │   │
-│  │  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐ │   │
-│  │  │  New Relic  │  │MySQL/Postgres│  │   Custom Metrics      │ │   │
-│  │  │Infrastructure│  │ Integrations │  │   Query Configs       │ │   │
-│  │  │    Agent    │  │              │  │                       │ │   │
-│  │  └──────┬──────┘  └──────┬───────┘  └──────────┬────────────┘ │   │
-│  │         │                 │                      │              │   │
-│  │         └─────────────────┴──────────────────────┘              │   │
-│  │                           │                                      │   │
-│  └───────────────────────────┼──────────────────────────────────────┘   │
-│                              │ Secure Database Connections              │
-└──────────────────────────────┼──────────────────────────────────────────┘
-                               │
-┌──────────────────────────────┴──────────────────────────────────────────┐
-│                          Database Infrastructure                          │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐         │
-│  │   MySQL Primary │  │ MySQL Replicas  │  │   PostgreSQL    │         │
-│  │                 │  │                 │  │    Cluster      │         │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘         │
-└──────────────────────────────────────────────────────────────────────────┘
-```
-
-## Component Architecture
-
-### 1. Infrastructure Layer (Terraform)
-
-```hcl
-Infrastructure Components:
-├── Compute
-│   ├── EC2 Instance (Monitoring Server)
-│   ├── Instance Profile (IAM Role)
-│   └── User Data (Bootstrap Script)
-├── Networking
-│   ├── Security Group
-│   ├── Network ACLs
-│   └── VPC Endpoints (Optional)
-├── Storage
-│   ├── EBS Volumes (Encrypted)
-│   └── S3 Buckets (Config Backup)
-└── Security
-    ├── KMS Keys
-    ├── Secrets Manager
-    └── SSM Parameters
-```
-
-**Key Design Decisions:**
-- **Single Instance Pattern**: One monitoring instance can handle 100+ databases
-- **Immutable Infrastructure**: Instances are replaced, not updated
-- **Secure by Default**: All storage encrypted, minimal network exposure
-- **Cloud-Native**: Leverages AWS services for security and scalability
-
-### 2. Configuration Management Layer (Ansible)
-
-```yaml
-Ansible Architecture:
-├── Inventory Management
-│   ├── Dynamic Inventory
-│   ├── Group Variables
-│   └── Host Variables
-├── Playbooks
-│   ├── Site.yml (Main Orchestrator)
-│   ├── Install-NewRelic.yml
-│   └── Configure-Databases.yml
-├── Roles
-│   ├── newrelic-infrastructure
-│   ├── mysql-integration
-│   └── postgresql-integration
-└── Templates
-    ├── Agent Configuration
-    ├── Integration Configs
-    └── Custom Queries
-```
-
-**Configuration Flow:**
-1. **Agent Installation**: Repository setup, package installation, service enablement
-2. **Integration Setup**: Database-specific packages and configurations
-3. **Custom Metrics**: Query definitions and collection intervals
-4. **Service Validation**: Health checks and connectivity tests
-
-### 3. Monitoring Configuration
-
-#### Database Credentials Management
-```yaml
-Credential Flow:
-1. AWS Secrets Manager / Parameter Store
-   └── Encrypted at rest
-2. Ansible Vault (Alternative)
-   └── Encrypted in repository
-3. Runtime Injection
-   └── Environment variables
-4. New Relic Agent
-   └── Secure transmission
-```
-
-#### Query Performance Monitoring Architecture
-
-**PostgreSQL Implementation:**
-```sql
-Components:
-├── pg_stat_statements
-│   ├── Query normalization
-│   ├── Execution statistics
-│   └── Resource consumption
-├── pg_stat_database
-│   ├── Connection metrics
-│   ├── Transaction rates
-│   └── Cache hit ratios
-└── Custom Queries
-    ├── Long running queries
-    ├── Lock analysis
-    └── Index usage
-```
-
-**MySQL Implementation:**
-```sql
-Components:
-├── performance_schema
-│   ├── Statement events
-│   ├── Wait events
-│   └── Stage events
-├── information_schema
-│   ├── Table statistics
-│   ├── Index statistics
-│   └── Engine status
-└── Custom Queries
-    ├── Slow query analysis
-    ├── Lock wait detection
-    └── Replication status
-```
-
-
-
-### 5. Security Architecture
+## Overview
 
 ```
-Security Layers:
-├── Network Security
-│   ├── Private Subnets
-│   ├── Security Groups (Least Privilege)
-│   ├── NACLs (Defense in Depth)
-│   └── VPC Endpoints (Private Connectivity)
-├── Identity & Access
-│   ├── IAM Roles (No Long-term Credentials)
-│   ├── Database Users (Read-only)
-│   ├── MFA Requirements
-│   └── Audit Logging
-├── Data Protection
-│   ├── Encryption in Transit (TLS 1.2+)
-│   ├── Encryption at Rest (KMS)
-│   ├── Secure Credential Storage
-│   └── Data Retention Policies
-└── Compliance
-    ├── CIS Benchmarks
-    ├── AWS Well-Architected
-    ├── SOC2 Controls
-    └── GDPR Compliance
+Your Databases → Monitoring Instance → New Relic
 ```
+
+That's it. We spin up an EC2 instance, install the New Relic agent, and it talks to your databases.
+
+## Components
+
+### EC2 Monitoring Instance
+- Runs New Relic Infrastructure agent
+- Has MySQL and PostgreSQL integrations
+- Polls your databases every 30-60 seconds
+- Sends data to New Relic
+
+### Network Setup
+```
+VPC
+├── Private Subnet
+│   ├── Monitoring Instance (EC2)
+│   └── Your Databases
+└── Security Groups
+    ├── monitoring-sg (allows outbound HTTPS)
+    └── database-sg (allows inbound from monitoring-sg)
+```
+
+### What Gets Collected
+
+**Infrastructure:**
+- CPU, memory, disk, network
+- Running processes
+- System logs
+
+**MySQL:**
+- Connections, queries/sec, slow queries
+- InnoDB metrics, buffer pool stats
+- Replication lag (if applicable)
+- Query performance (via Performance Schema)
+
+**PostgreSQL:**
+- Connections, transactions, cache hit ratio
+- Table/index stats, vacuum info
+- Lock waits, deadlocks
+- Query performance (via pg_stat_statements)
+
+## Security
+
+- Database credentials stored locally on monitoring instance
+- Agent uses HTTPS to talk to New Relic
+- Least privilege database users (read-only)
+- Security groups restrict access
+
+## Scaling
+
+**Single Instance:** Good for ~100 databases
+
+**Need more?**
+- Deploy multiple monitoring instances
+- Split by region/environment
+- Each instance handles a subset
+
+## Configuration Flow
+
+1. Terraform creates the infrastructure
+2. Ansible installs/configures the agent
+3. Agent reads config files
+4. Starts collecting and sending data
+
+## File Structure
+
+```
+/etc/newrelic-infra.yml                     # Main agent config
+/etc/newrelic-infra/integrations.d/
+├── mysql-config.yml                        # MySQL databases
+└── postgresql-config.yml                   # PostgreSQL databases
+```
+
+## Data Flow
+
+1. Agent queries database every interval (30s default)
+2. Collects metrics, formats as JSON
+3. Batches and compresses data
+4. POST to New Relic API over HTTPS
+5. Shows up in your dashboards
+
+## Failure Handling
+
+- Can't reach database? Logs error, tries next interval
+- Can't reach New Relic? Buffers locally, retries
+- Instance dies? Auto-recovery enabled
+
+## Cost Breakdown
+
+- EC2 instance: ~$30-50/month (t3.medium)
+- Network transfer: Minimal (compressed data)
+- Storage: 30GB EBS included
+- New Relic: Based on your plan
+
+## Customization Points
+
+- Collection intervals
+- Which metrics to collect
+- Custom SQL queries
+- Instance size
+- Multiple regions

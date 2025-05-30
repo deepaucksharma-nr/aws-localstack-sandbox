@@ -16,29 +16,8 @@ GRANT SELECT ON performance_schema.* TO 'newrelic'@'%';
 GRANT SELECT ON information_schema.* TO 'newrelic'@'%';
 GRANT SELECT ON mysql.user TO 'newrelic'@'%';
 
--- Enable performance schema consumers for query monitoring
-UPDATE performance_schema.setup_consumers 
-SET ENABLED = 'YES' 
-WHERE NAME IN (
-    'events_statements_current',
-    'events_statements_history',
-    'events_statements_history_long',
-    'events_waits_current',
-    'events_waits_history',
-    'events_waits_history_long'
-);
-
--- Enable statement instrumentation
-UPDATE performance_schema.setup_instruments 
-SET ENABLED = 'YES', TIMED = 'YES' 
-WHERE NAME LIKE 'statement/%';
-
--- Enable wait instrumentation for query analysis
-UPDATE performance_schema.setup_instruments 
-SET ENABLED = 'YES', TIMED = 'YES' 
-WHERE NAME LIKE 'wait/io/file/%' 
-   OR NAME LIKE 'wait/io/table/%' 
-   OR NAME LIKE 'wait/lock/table/%';
+-- Note: Performance schema configuration would need to be done after container starts
+-- as it requires SUPER privilege which isn't available during init
 
 -- Create test tables
 USE testdb;
