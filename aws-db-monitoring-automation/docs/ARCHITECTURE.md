@@ -111,30 +111,9 @@ All services are available in the free Community Edition:
 │  │  └────────────────────────────┘    │   │
 │  └─────────────────────────────────────┘   │
 └─────────────────────────────────────────────┘
-                      │
-                      ▼
-              ┌──────────────┐
-              │  New Relic   │
-              │   Cloud      │
-              └──────────────┘
+                     
 ```
 
-### Data Collection Flow
-
-1. **Agent Initialization**
-   - Reads configuration from `/etc/newrelic-infra/integrations.d/`
-   - Establishes database connections
-   - Validates permissions
-
-2. **Metric Collection** (every 30-60s)
-   - Queries database statistics
-   - Collects performance metrics
-   - Gathers query performance data
-
-3. **Data Transmission**
-   - Batches metrics
-   - Compresses payload
-   - Sends via HTTPS to New Relic
 
 ## Security Best Practices
 
