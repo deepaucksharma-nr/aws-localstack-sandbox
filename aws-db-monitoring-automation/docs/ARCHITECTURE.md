@@ -5,15 +5,7 @@
 This reference implementation follows a modular, cloud-native architecture designed for scalability, security, and maintainability.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           New Relic One Platform                         │
-│  ┌─────────────┐  ┌──────────────┐  ┌────────────┐  ┌───────────────┐ │
-│  │Infrastructure│  │  Database    │  │   Query    │  │    Custom     │ │
-│  │  Dashboard   │  │  Monitoring  │  │Performance │  │  Dashboards   │ │
-│  └─────────────┘  └──────────────┘  └────────────┘  └───────────────┘ │
-└─────────────────────────────────┬───────────────────────────────────────┘
-                                  │ HTTPS/TLS
-                                  │
+
 ┌─────────────────────────────────┴───────────────────────────────────────┐
 │                          Monitoring Infrastructure                        │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
