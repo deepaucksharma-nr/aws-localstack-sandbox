@@ -1,0 +1,68 @@
+integrations:
+{% for db in postgresql_databases %}
+  - name: nri-postgresql
+    env:
+      HOSTNAME: {{ db.host }}
+      PORT: {{ db.port | default(5432) }}
+      USERNAME: {{ db.user }}
+      PASSWORD: {{ db.password }}
+      DATABASE: {{ db.database | default('postgres') }}
+      
+      # Enable SSL
+{% if db.sslmode is defined %}
+      ENABLE_SSL: {{ 'true' if db.sslmode != 'disable' else 'false' }}
+      SSL_MODE: {{ db.sslmode }}
+{% if db.ssl_root_cert_location is defined %}
+      SSL_ROOT_CERT_LOCATION: {{ db.ssl_root_cert_location }}
+{% endif %}
+{% if db.ssl_cert_location is defined %}
+      SSL_CERT_LOCATION: {{ db.ssl_cert_location }}
+{% endif %}
+{% if db.ssl_key_location is defined %}
+      SSL_KEY_LOCATION: {{ db.ssl_key_location }}
+{% endif %}
+{% endif %}
+      
+      # Collection flags
+      COLLECTION_LIST: '{{ db.collection_list | default("ALL") }}'
+      COLLECT_DB_LOCK_METRICS: {{ db.collect_db_lock_metrics | default(true) | lower }}
+      COLLECT_BLOAT_METRICS: {{ db.collect_bloat_metrics | default(true) | lower }}
+      
+      # Metrics collection
+      METRICS: true
+      
+      # Inventory collection
+      INVENTORY: true
+      
+      # Custom queries file (optional)
+{% if db.custom_metrics_query_file is defined %}
+      CUSTOM_METRICS_QUERY_FILE: {{ db.custom_metrics_query_file }}
+{% else %}
+      # Enable query performance monitoring by default
+      CUSTOM_METRICS_QUERY_FILE: /etc/newrelic-infra/integrations.d/postgresql-custom-queries.yml
+{% endif %}
+      
+      # Query monitoring specific settings
+{% if db.enable_query_monitoring is not defined or db.enable_query_monitoring %}
+      # Collect pg_stat_statements metrics
+      PG_STAT_STATEMENTS: true
+      
+      # Maximum number of normalized queries to collect
+      MAX_SQL_QUERY_LENGTH: {{ db.max_sql_query_length | default(1000) }}
+      
+      # Query collection interval (separate from main metrics)
+      QUERY_METRICS_INTERVAL: {{ db.query_metrics_interval | default('60s') }}
+{% endif %}
+    
+    labels:
+      env: {{ db.environment | default(environment) | default('production') }}
+      database_type: postgresql
+      service_name: {{ db.service_name | default('postgresql-' + db.host) }}
+{% if db.custom_labels is defined %}
+{% for key, value in db.custom_labels.items() %}
+      {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}
+    
+    interval: {{ db.interval | default('30s') }}
+{% endfor %}

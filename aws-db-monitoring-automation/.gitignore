@@ -1,0 +1,87 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+!terraform.tfvars.example
+!terraform.localstack.tfvars
+tfplan
+*.tfplan
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Ansible
+*.retry
+ansible/inventory/hosts.yml
+!ansible/inventory/hosts.yml.example
+
+# Configuration
+config/databases.yml
+!config/databases.example.yml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test artifacts
+test-results/
+test-artifacts/
+coverage/
+*.log
+*.junit.xml
+.localstack/
+
+# Docker
+.env
+docker-compose.override.yml
+
+# SSH Keys
+*.pem
+*.key
+/tmp/test-key*
+
+# Node modules (for mock services)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Security scan results
+trivy-results.sarif
+checkov-results.sarif

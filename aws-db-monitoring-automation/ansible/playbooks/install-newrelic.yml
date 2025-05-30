@@ -1,0 +1,131 @@
+---
+- name: Install and Configure New Relic Infrastructure Agent with Database Monitoring
+  hosts: monitoring_server
+  become: yes
+  vars:
+    newrelic_license_key: "{{ newrelic_license_key }}"
+    newrelic_account_id: "{{ newrelic_account_id }}"
+    newrelic_region: "{{ newrelic_region | default('US') }}"
+    newrelic_api_url: "{{ 'https://api.eu.newrelic.com' if newrelic_region == 'EU' else 'https://api.newrelic.com' }}"
+    
+  tasks:
+    - name: Install required packages
+      package:
+        name:
+          - curl
+          - wget
+          - python3
+          - python3-pip
+        state: present
+
+    - name: Add New Relic GPG key
+      rpm_key:
+        key: https://download.newrelic.com/infrastructure_agent/gpg/newrelic-infra.gpg
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Add New Relic repository (RedHat/CentOS)
+      yum_repository:
+        name: newrelic-infra
+        description: New Relic Infrastructure Agent
+        baseurl: https://download.newrelic.com/infrastructure_agent/linux/yum/el/$releasever/$basearch
+        gpgcheck: yes
+        gpgkey: https://download.newrelic.com/infrastructure_agent/gpg/newrelic-infra.gpg
+        enabled: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Install New Relic Infrastructure agent
+      package:
+        name: newrelic-infra
+        state: present
+
+    - name: Configure New Relic Infrastructure agent
+      template:
+        src: newrelic-infra.yml.j2
+        dest: /etc/newrelic-infra.yml
+        mode: '0600'
+        owner: root
+        group: root
+
+    - name: Create New Relic integrations directory
+      file:
+        path: /etc/newrelic-infra/integrations.d
+        state: directory
+        mode: '0755'
+
+    - name: Install MySQL integration
+      package:
+        name: nri-mysql
+        state: present
+      when: mysql_databases is defined and mysql_databases | length > 0
+
+    - name: Install PostgreSQL integration
+      package:
+        name: nri-postgresql
+        state: present
+      when: postgresql_databases is defined and postgresql_databases | length > 0
+
+    - name: Configure MySQL monitoring
+      template:
+        src: mysql-config.yml.j2
+        dest: "/etc/newrelic-infra/integrations.d/mysql-config.yml"
+        mode: '0600'
+        owner: root
+        group: root
+      when: mysql_databases is defined and mysql_databases | length > 0
+      notify: restart newrelic-infra
+
+    - name: Deploy MySQL custom queries for query monitoring
+      template:
+        src: mysql-custom-queries.yml.j2
+        dest: "/etc/newrelic-infra/integrations.d/mysql-custom-queries.yml"
+        mode: '0600'
+        owner: root
+        group: root
+      when: mysql_databases is defined and mysql_databases | length > 0
+      notify: restart newrelic-infra
+
+    - name: Configure PostgreSQL monitoring
+      template:
+        src: postgresql-config.yml.j2
+        dest: "/etc/newrelic-infra/integrations.d/postgresql-config.yml"
+        mode: '0600'
+        owner: root
+        group: root
+      when: postgresql_databases is defined and postgresql_databases | length > 0
+      notify: restart newrelic-infra
+
+    - name: Deploy PostgreSQL custom queries for query monitoring
+      template:
+        src: postgresql-custom-queries.yml.j2
+        dest: "/etc/newrelic-infra/integrations.d/postgresql-custom-queries.yml"
+        mode: '0600'
+        owner: root
+        group: root
+      when: postgresql_databases is defined and postgresql_databases | length > 0
+      notify: restart newrelic-infra
+
+    - name: Start and enable New Relic Infrastructure agent
+      systemd:
+        name: newrelic-infra
+        state: started
+        enabled: yes
+
+    - name: Wait for agent to connect
+      pause:
+        seconds: 30
+
+    - name: Verify agent status
+      command: systemctl status newrelic-infra
+      register: agent_status
+      changed_when: false
+
+    - name: Display agent status
+      debug:
+        var: agent_status.stdout_lines
+
+  handlers:
+    - name: restart newrelic-infra
+      systemd:
+        name: newrelic-infra
+        state: restarted

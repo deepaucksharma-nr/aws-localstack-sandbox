@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  # LocalStack for AWS services simulation
+  localstack:
+    image: localstack/localstack:latest
+    container_name: localstack
+    ports:
+      - "4566:4566"              # LocalStack Gateway
+      - "4571:4571"              # Elasticsearch
+    environment:
+      - SERVICES=ec2,sts,iam,ssm,secretsmanager
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+      - LAMBDA_EXECUTOR=docker
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - "${TMPDIR:-/tmp}/localstack:/tmp/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./localstack/init-aws.sh:/docker-entrypoint-initaws.d/init-aws.sh"
+    networks:
+      - monitoring-network
+
+  # MySQL test database
+  mysql-test:
+    image: mysql:8.0
+    container_name: mysql-test
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=testdb
+      - MYSQL_USER=newrelic
+      - MYSQL_PASSWORD=newrelic123
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./test/fixtures/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+    networks:
+      - monitoring-network
+
+  # PostgreSQL test database
+  postgres-test:
+    image: postgres:15
+    container_name: postgres-test
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres123
+      - POSTGRES_DB=testdb
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./test/fixtures/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - monitoring-network
+
+  # Mock New Relic API server
+  mock-newrelic:
+    build:
+      context: ./mock-services
+      dockerfile: Dockerfile.newrelic
+    container_name: mock-newrelic
+    ports:
+      - "8080:8080"  # Mock API endpoint
+      - "8081:8081"  # Mock Infrastructure endpoint
+    environment:
+      - NODE_ENV=test
+    volumes:
+      - ./mock-services:/app
+    networks:
+      - monitoring-network
+
+  # Test runner container
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: test-runner
+    depends_on:
+      - localstack
+      - mysql-test
+      - postgres-test
+      - mock-newrelic
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - MYSQL_HOST=mysql-test
+      - POSTGRES_HOST=postgres-test
+      - NEWRELIC_API_ENDPOINT=http://mock-newrelic:8080
+      - NEWRELIC_LICENSE_KEY=test_license_key_123
+    volumes:
+      - .:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - monitoring-network
+    command: sleep infinity
+
+networks:
+  monitoring-network:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  postgres-data:

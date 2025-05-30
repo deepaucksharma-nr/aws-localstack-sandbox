@@ -1,0 +1,268 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  TERRAFORM_VERSION: 1.6.0
+  PYTHON_VERSION: 3.11
+
+jobs:
+  lint:
+    name: Lint and Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install linting tools
+        run: |
+          pip install ansible-lint yamllint flake8
+          npm install -g markdownlint-cli
+
+      - name: Lint Ansible playbooks
+        run: |
+          yamllint ansible/
+          ansible-lint ansible/playbooks/*.yml
+
+      - name: Lint Python scripts
+        run: |
+          flake8 test/ --max-line-length=120 || true
+
+      - name: Lint Markdown files
+        run: |
+          markdownlint README.md docs/*.md || true
+
+      - name: Validate Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      - name: Terraform fmt check
+        run: |
+          cd terraform
+          terraform fmt -check -recursive
+
+      - name: Terraform init and validate
+        run: |
+          cd terraform
+          terraform init -backend=false
+          terraform validate
+
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r test/requirements.txt
+
+      - name: Run unit tests
+        run: |
+          cd test
+          python -m pytest unit/ -v --junit-xml=unit-test-results.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: unit-test-results
+          path: test/unit-test-results.xml
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: testdb
+          MYSQL_USER: newrelic
+          MYSQL_PASSWORD: newrelic123
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres123
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Start LocalStack
+        run: |
+          pip install localstack awscli-local[ver1]
+          docker pull localstack/localstack:latest
+          localstack start -d
+          echo "Waiting for LocalStack to be ready..."
+          localstack wait -t 30
+
+      - name: Install dependencies
+        run: |
+          pip install -r test/requirements.txt
+
+      - name: Initialize test databases
+        run: |
+          mysql -h 127.0.0.1 -u root -prootpassword < test/fixtures/mysql-init.sql
+          PGPASSWORD=postgres123 psql -h 127.0.0.1 -U postgres -d testdb -f test/fixtures/postgres-init.sql
+
+      - name: Run integration tests
+        env:
+          MYSQL_HOST: 127.0.0.1
+          POSTGRES_HOST: 127.0.0.1
+          LOCALSTACK_ENDPOINT: http://localhost:4566
+        run: |
+          cd test
+          python -m pytest integration/ -v --junit-xml=integration-test-results.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: integration-test-results
+          path: test/integration-test-results.xml
+
+  test-e2e:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    needs: [test-unit, test-integration]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start test environment
+        run: |
+          docker-compose up -d
+          echo "Waiting for services to be ready..."
+          sleep 30
+
+      - name: Run E2E tests
+        run: |
+          docker-compose exec -T test-runner /usr/local/bin/run-tests.sh all
+
+      - name: Collect logs
+        if: always()
+        run: |
+          docker-compose logs > docker-compose.log
+          mkdir -p test-artifacts
+          mv docker-compose.log test-artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: e2e-test-artifacts
+          path: test-artifacts/
+
+      - name: Stop test environment
+        if: always()
+        run: |
+          docker-compose down -v
+
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy security scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Checkov for Terraform
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: terraform/
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+
+      - name: Upload Checkov results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'checkov-results.sarif'
+
+  build-and-publish:
+    name: Build and Publish
+    runs-on: ubuntu-latest
+    needs: [test-e2e, security-scan]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push test image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.test
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/aws-db-monitoring:test-latest
+            ${{ secrets.DOCKER_USERNAME }}/aws-db-monitoring:test-${{ github.sha }}
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            scripts/deploy-monitoring.sh
+            terraform/*.tf
+            ansible/playbooks/*.yml
+          generate_release_notes: true

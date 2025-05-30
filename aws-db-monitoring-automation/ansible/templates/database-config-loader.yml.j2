@@ -1,0 +1,34 @@
+# Database Configuration Loader
+# This template detects whether to use standard or enhanced configuration format
+
+# Check if we're using the enhanced format (with provider field)
+{% set use_enhanced = false %}
+{% if mysql_databases is defined %}
+{% for db in mysql_databases if db.provider is defined %}
+{% set use_enhanced = true %}
+{% endfor %}
+{% endif %}
+{% if postgresql_databases is defined %}
+{% for db in postgresql_databases if db.provider is defined %}
+{% set use_enhanced = true %}
+{% endfor %}
+{% endif %}
+
+# Load appropriate configuration
+{% if use_enhanced %}
+# Using enhanced configuration with provider support
+{% if mysql_databases is defined and mysql_databases | length > 0 %}
+{% include 'mysql-config-enhanced.yml.j2' %}
+{% endif %}
+{% if postgresql_databases is defined and postgresql_databases | length > 0 %}
+{% include 'postgresql-config-enhanced.yml.j2' %}
+{% endif %}
+{% else %}
+# Using standard configuration (backward compatibility)
+{% if mysql_databases is defined and mysql_databases | length > 0 %}
+{% include 'mysql-config.yml.j2' %}
+{% endif %}
+{% if postgresql_databases is defined and postgresql_databases | length > 0 %}
+{% include 'postgresql-config.yml.j2' %}
+{% endif %}
+{% endif %}

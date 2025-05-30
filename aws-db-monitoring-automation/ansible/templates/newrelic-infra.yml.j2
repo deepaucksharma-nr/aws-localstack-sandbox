@@ -1,0 +1,18 @@
+license_key: {{ newrelic_license_key }}
+
+# Display name for this host in New Relic
+display_name: {{ inventory_hostname }}
+
+# Log level
+log_level: info
+
+# Custom attributes
+custom_attributes:
+  environment: {{ environment | default('production') }}
+  role: database-monitoring
+  region: {{ aws_region | default('us-east-1') }}
+{% if custom_attributes is defined %}
+{% for key, value in custom_attributes.items() %}
+  {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}

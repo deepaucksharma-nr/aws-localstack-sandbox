@@ -1,0 +1,179 @@
+# PostgreSQL Custom Queries for Query Performance Monitoring
+# This file contains custom SQL queries for advanced monitoring metrics
+
+queries:
+  # Top Slow Queries by Total Time
+  - name: pg_stat_statements_top_queries_by_time
+    run_on:
+      - postgres
+    query: |
+      SELECT
+        queryid::text AS query_id,
+        LEFT(query, 50) AS query_text_sample,
+        calls,
+        total_exec_time AS total_time_ms,
+        mean_exec_time AS mean_time_ms,
+        stddev_exec_time AS stddev_time_ms,
+        min_exec_time AS min_time_ms,
+        max_exec_time AS max_time_ms,
+        rows,
+        100.0 * shared_blks_hit / NULLIF(shared_blks_hit + shared_blks_read, 0) AS hit_percent,
+        userid::regrole::text AS username,
+        dbid::regdatabase::text AS database_name
+      FROM pg_stat_statements
+      WHERE query NOT LIKE '%pg_stat_statements%'
+      ORDER BY total_exec_time DESC
+      LIMIT 20
+    columns:
+      - query_id: text
+      - query_text_sample: text
+      - calls: bigint
+      - total_time_ms: double
+      - mean_time_ms: double
+      - stddev_time_ms: double
+      - min_time_ms: double
+      - max_time_ms: double
+      - rows: bigint
+      - hit_percent: double
+      - username: text
+      - database_name: text
+
+  # Query Wait Events Analysis
+  - name: pg_stat_activity_wait_events
+    run_on:
+      - postgres
+    query: |
+      SELECT
+        wait_event_type,
+        wait_event,
+        COUNT(*) AS count,
+        COUNT(*) FILTER (WHERE state = 'active') AS active_count
+      FROM pg_stat_activity
+      WHERE wait_event IS NOT NULL
+      GROUP BY wait_event_type, wait_event
+      ORDER BY count DESC
+    columns:
+      - wait_event_type: text
+      - wait_event: text
+      - count: bigint
+      - active_count: bigint
+
+  # Long Running Queries
+  - name: pg_long_running_queries
+    run_on:
+      - postgres
+    query: |
+      SELECT
+        pid,
+        now() - pg_stat_activity.query_start AS duration,
+        state,
+        wait_event_type,
+        wait_event,
+        LEFT(query, 50) AS query_text_sample,
+        usename AS username,
+        datname AS database_name,
+        client_addr,
+        application_name
+      FROM pg_stat_activity
+      WHERE (now() - pg_stat_activity.query_start) > interval '5 minutes'
+        AND state != 'idle'
+        AND query NOT LIKE '%pg_stat_activity%'
+      ORDER BY duration DESC
+      LIMIT 10
+    columns:
+      - pid: integer
+      - duration: interval
+      - state: text
+      - wait_event_type: text
+      - wait_event: text
+      - query_text_sample: text
+      - username: text
+      - database_name: text
+      - client_addr: inet
+      - application_name: text
+
+  # Table Bloat Analysis
+  - name: pg_table_bloat
+    run_on:
+      - postgres
+    query: |
+      WITH constants AS (
+        SELECT current_setting('block_size')::numeric AS bs, 23 AS hdr, 4 AS ma
+      ),
+      bloat_info AS (
+        SELECT
+          schemaname,
+          tablename,
+          cc.relpages,
+          bs,
+          CEIL((cc.reltuples*((datahdr+ma-
+            (CASE WHEN datahdr%ma=0 THEN ma ELSE datahdr%ma END))+nullhdr2+4))/(bs-20::float)) AS otta
+        FROM (
+          SELECT
+            schemaname,
+            tablename,
+            hdr,
+            ma,
+            bs,
+            SUM((1-null_frac)*avg_width) AS datahdr,
+            MAX(null_frac) AS maxfracsum,
+            hdr+(
+              SELECT 1+COUNT(*)/8
+              FROM pg_stats s2
+              WHERE null_frac<>0 AND s2.schemaname = s.schemaname AND s2.tablename = s.tablename
+            ) AS nullhdr2
+          FROM pg_stats s, constants
+          GROUP BY 1,2,3,4,5
+        ) AS foo
+        JOIN pg_class cc ON cc.relname = tablename
+        JOIN pg_namespace nn ON cc.relnamespace = nn.oid AND nn.nspname = schemaname AND nn.nspname <> 'information_schema'
+      )
+      SELECT
+        schemaname,
+        tablename,
+        ROUND(CASE WHEN otta=0 THEN 0.0 ELSE relpages/otta::numeric END,1) AS bloat_ratio,
+        relpages AS pages,
+        ROUND(bs*(relpages-otta)::numeric/1024/1024, 2) AS waste_mb
+      FROM bloat_info
+      WHERE relpages > otta
+      ORDER BY waste_mb DESC
+      LIMIT 10
+    columns:
+      - schemaname: text
+      - tablename: text
+      - bloat_ratio: numeric
+      - pages: integer
+      - waste_mb: numeric
+
+  # Index Usage Statistics
+  - name: pg_index_usage_stats
+    run_on:
+      - postgres
+    query: |
+      SELECT
+        schemaname,
+        tablename,
+        indexname,
+        idx_scan AS index_scans,
+        idx_tup_read AS tuples_read,
+        idx_tup_fetch AS tuples_fetched,
+        pg_size_pretty(pg_relation_size(indexrelid)) AS index_size,
+        CASE
+          WHEN idx_scan = 0 THEN 'unused'
+          WHEN idx_scan < 100 THEN 'rarely_used'
+          ELSE 'active'
+        END AS usage_status
+      FROM pg_stat_user_indexes
+      JOIN pg_index ON pg_stat_user_indexes.indexrelid = pg_index.indexrelid
+      WHERE NOT indisunique
+      ORDER BY idx_scan
+      LIMIT 20
+    columns:
+      - schemaname: text
+      - tablename: text
+      - indexname: text
+      - index_scans: bigint
+      - tuples_read: bigint
+      - tuples_fetched: bigint
+      - index_size: text
+      - usage_status: text

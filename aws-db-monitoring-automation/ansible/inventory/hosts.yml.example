@@ -1,0 +1,33 @@
+all:
+  hosts:
+    monitoring_server:
+      ansible_host: 10.0.1.100  # Replace with your EC2 instance IP
+      ansible_user: ec2-user
+      ansible_ssh_private_key_file: ~/.ssh/your-key.pem
+      ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+      
+      # Optional: Variables for the monitoring server
+      pmm_version: "2.40.0"
+      pmm_server_url: "https://pmm.example.com"
+      
+      # Database configurations can be passed here
+      mysql_databases:
+        - host: mysql-prod.example.com
+          port: 3306
+          user: monitoring_user
+          password: "{{ vault_mysql_prod_password }}"
+          service_name: mysql-production
+          custom_labels:
+            environment: production
+            team: backend
+      
+      postgresql_databases:
+        - host: postgres-analytics.example.com
+          port: 5432
+          user: monitoring_user
+          password: "{{ vault_postgres_analytics_password }}"
+          database: analytics
+          service_name: postgres-analytics
+          custom_labels:
+            environment: production
+            team: data

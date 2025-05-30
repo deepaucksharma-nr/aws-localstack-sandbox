@@ -1,0 +1,16 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Install dependencies
+COPY package*.json ./
+RUN npm ci --only=production
+
+# Copy application files
+COPY . .
+
+# Expose ports
+EXPOSE 8080 8081
+
+# Start the mock server
+CMD ["node", "server.js"]

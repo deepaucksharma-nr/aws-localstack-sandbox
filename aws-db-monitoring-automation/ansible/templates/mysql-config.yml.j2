@@ -1,0 +1,68 @@
+integrations:
+{% for db in mysql_databases %}
+  - name: nri-mysql
+    env:
+      HOSTNAME: {{ db.host }}
+      PORT: {{ db.port | default(3306) }}
+      USERNAME: {{ db.user }}
+      PASSWORD: {{ db.password }}
+{% if db.database is defined %}
+      DATABASE: {{ db.database }}
+{% endif %}
+      REMOTE_MONITORING: true
+      
+      # Metrics collection
+      METRICS: true
+      
+      # Extended metrics
+      EXTENDED_METRICS: {{ db.extended_metrics | default(true) | lower }}
+      
+      # Inventory collection
+      INVENTORY: true
+{% if db.tls_enabled is defined and db.tls_enabled %}
+      
+      # TLS Configuration
+      ENABLE_TLS: true
+{% if db.tls_ca is defined %}
+      TLS_CA_BUNDLE: {{ db.tls_ca }}
+{% endif %}
+{% if db.tls_insecure_skip_verify is defined %}
+      TLS_INSECURE_SKIP_VERIFY: {{ db.tls_insecure_skip_verify | lower }}
+{% endif %}
+{% endif %}
+      
+      # Custom queries file for query performance monitoring
+{% if db.custom_metrics_query_file is defined %}
+      CUSTOM_METRICS_QUERY_FILE: {{ db.custom_metrics_query_file }}
+{% else %}
+      # Enable query performance monitoring by default
+      CUSTOM_METRICS_QUERY_FILE: /etc/newrelic-infra/integrations.d/mysql-custom-queries.yml
+{% endif %}
+      
+      # Query monitoring specific settings
+{% if db.enable_query_monitoring is not defined or db.enable_query_monitoring %}
+      # Enable performance schema metrics collection
+      PERFORMANCE_SCHEMA: true
+      
+      # Maximum number of normalized queries to collect
+      MAX_SQL_QUERY_LENGTH: {{ db.max_sql_query_length | default(1000) }}
+      
+      # Query collection interval (separate from main metrics)
+      QUERY_METRICS_INTERVAL: {{ db.query_metrics_interval | default('60s') }}
+      
+      # Collect query samples
+      GATHER_QUERY_SAMPLES: {{ db.gather_query_samples | default(true) | lower }}
+{% endif %}
+    
+    labels:
+      env: {{ db.environment | default(environment) | default('production') }}
+      database_type: mysql
+      service_name: {{ db.service_name | default('mysql-' + db.host) }}
+{% if db.custom_labels is defined %}
+{% for key, value in db.custom_labels.items() %}
+      {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}
+    
+    interval: {{ db.interval | default('30s') }}
+{% endfor %}

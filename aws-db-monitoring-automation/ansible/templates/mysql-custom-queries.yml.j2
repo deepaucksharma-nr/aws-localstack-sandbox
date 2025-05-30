@@ -1,0 +1,176 @@
+# MySQL Custom Queries for Query Performance Monitoring
+# This file contains custom SQL queries for advanced monitoring metrics
+
+queries:
+  # Top Slow Queries from Performance Schema
+  - name: mysql_top_queries_by_time
+    run_on:
+      - mysql
+    query: |
+      SELECT
+        DIGEST AS query_digest,
+        LEFT(DIGEST_TEXT, 50) AS query_text_sample,
+        COUNT_STAR AS exec_count,
+        SUM_TIMER_WAIT/1000000000 AS total_time_ms,
+        AVG_TIMER_WAIT/1000000000 AS avg_time_ms,
+        MIN_TIMER_WAIT/1000000000 AS min_time_ms,
+        MAX_TIMER_WAIT/1000000000 AS max_time_ms,
+        SUM_ROWS_SENT AS total_rows_sent,
+        SUM_ROWS_EXAMINED AS total_rows_examined,
+        SUM_ROWS_AFFECTED AS total_rows_affected,
+        SUM_NO_INDEX_USED AS full_scans,
+        SUM_NO_GOOD_INDEX_USED AS full_joins
+      FROM performance_schema.events_statements_summary_by_digest
+      WHERE DIGEST_TEXT NOT LIKE '%performance_schema%'
+        AND DIGEST_TEXT NOT LIKE '%information_schema%'
+      ORDER BY SUM_TIMER_WAIT DESC
+      LIMIT 20
+    columns:
+      - query_digest: varchar
+      - query_text_sample: varchar
+      - exec_count: bigint
+      - total_time_ms: double
+      - avg_time_ms: double
+      - min_time_ms: double
+      - max_time_ms: double
+      - total_rows_sent: bigint
+      - total_rows_examined: bigint
+      - total_rows_affected: bigint
+      - full_scans: bigint
+      - full_joins: bigint
+
+  # Current Wait Events
+  - name: mysql_current_wait_events
+    run_on:
+      - mysql
+    query: |
+      SELECT
+        EVENT_NAME AS wait_event,
+        COUNT(*) AS thread_count,
+        SUM(TIMER_WAIT)/1000000000 AS total_wait_ms
+      FROM performance_schema.events_waits_current
+      WHERE TIMER_WAIT > 0
+      GROUP BY EVENT_NAME
+      ORDER BY total_wait_ms DESC
+      LIMIT 20
+    columns:
+      - wait_event: varchar
+      - thread_count: bigint
+      - total_wait_ms: double
+
+  # Long Running Queries
+  - name: mysql_long_running_queries
+    run_on:
+      - mysql
+    query: |
+      SELECT
+        ID AS process_id,
+        USER AS username,
+        HOST AS client_host,
+        DB AS database_name,
+        COMMAND AS command,
+        TIME AS duration_seconds,
+        STATE AS query_state,
+        LEFT(INFO, 50) AS query_text_sample
+      FROM information_schema.PROCESSLIST
+      WHERE TIME > 300
+        AND COMMAND NOT IN ('Sleep', 'Binlog Dump', 'Binlog Dump GTID')
+        AND INFO IS NOT NULL
+      ORDER BY TIME DESC
+      LIMIT 10
+    columns:
+      - process_id: bigint
+      - username: varchar
+      - client_host: varchar
+      - database_name: varchar
+      - command: varchar
+      - duration_seconds: bigint
+      - query_state: varchar
+      - query_text_sample: varchar
+
+  # Table Statistics
+  - name: mysql_table_statistics
+    run_on:
+      - mysql
+    query: |
+      SELECT
+        TABLE_SCHEMA AS schema_name,
+        TABLE_NAME AS table_name,
+        TABLE_ROWS AS row_count,
+        ROUND(DATA_LENGTH/1024/1024, 2) AS data_size_mb,
+        ROUND(INDEX_LENGTH/1024/1024, 2) AS index_size_mb,
+        ROUND((DATA_LENGTH + INDEX_LENGTH)/1024/1024, 2) AS total_size_mb,
+        ROUND(DATA_FREE/1024/1024, 2) AS free_space_mb,
+        ROUND(DATA_FREE * 100 / (DATA_LENGTH + INDEX_LENGTH), 2) AS fragmentation_percent
+      FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+        AND TABLE_TYPE = 'BASE TABLE'
+      ORDER BY (DATA_LENGTH + INDEX_LENGTH) DESC
+      LIMIT 20
+    columns:
+      - schema_name: varchar
+      - table_name: varchar
+      - row_count: bigint
+      - data_size_mb: double
+      - index_size_mb: double
+      - total_size_mb: double
+      - free_space_mb: double
+      - fragmentation_percent: double
+
+  # Index Usage Statistics
+  - name: mysql_unused_indexes
+    run_on:
+      - mysql
+    query: |
+      SELECT
+        object_schema AS schema_name,
+        object_name AS table_name,
+        index_name,
+        COUNT_READ AS read_count,
+        COUNT_WRITE AS write_count,
+        COUNT_FETCH AS fetch_count,
+        COUNT_INSERT AS insert_count,
+        COUNT_UPDATE AS update_count,
+        COUNT_DELETE AS delete_count
+      FROM performance_schema.table_io_waits_summary_by_index_usage
+      WHERE index_name IS NOT NULL
+        AND index_name != 'PRIMARY'
+        AND object_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+        AND COUNT_READ = 0
+      ORDER BY object_schema, object_name, index_name
+      LIMIT 20
+    columns:
+      - schema_name: varchar
+      - table_name: varchar
+      - index_name: varchar
+      - read_count: bigint
+      - write_count: bigint
+      - fetch_count: bigint
+      - insert_count: bigint
+      - update_count: bigint
+      - delete_count: bigint
+
+  # Lock Wait Statistics
+  - name: mysql_lock_waits
+    run_on:
+      - mysql
+    query: |
+      SELECT
+        OBJECT_SCHEMA AS schema_name,
+        OBJECT_NAME AS table_name,
+        COUNT_STAR AS lock_wait_count,
+        SUM_TIMER_WAIT/1000000000 AS total_wait_time_ms,
+        AVG_TIMER_WAIT/1000000000 AS avg_wait_time_ms,
+        MAX_TIMER_WAIT/1000000000 AS max_wait_time_ms
+      FROM performance_schema.table_lock_waits_summary_by_table
+      WHERE COUNT_STAR > 0
+        AND OBJECT_SCHEMA NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+      ORDER BY SUM_TIMER_WAIT DESC
+      LIMIT 20
+    columns:
+      - schema_name: varchar
+      - table_name: varchar
+      - lock_wait_count: bigint
+      - total_wait_time_ms: double
+      - avg_wait_time_ms: double
+      - max_wait_time_ms: double
