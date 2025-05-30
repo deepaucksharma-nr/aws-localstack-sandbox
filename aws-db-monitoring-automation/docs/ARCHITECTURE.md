@@ -23,10 +23,6 @@ terraform apply
 # - All AWS resources needed
 ```
 
-**Developer Benefits:**
-- **Reproducible deployments** - Same result every time
-- **Modular design** - Use only what you need
-
 ### 3. Configuration Management with Ansible
 
 Ansible handles all the complex configuration:
@@ -38,11 +34,6 @@ Ansible handles all the complex configuration:
 # - Manages credentials securely
 # - Applies best practices
 ```
-
-**Developer Benefits:**
-- **No manual SSH needed** - Fully automated
-- **Idempotent** - Run multiple times safely
-- **Template-driven** - Easy to customize
 
 ## LocalStack Integration Details
 
