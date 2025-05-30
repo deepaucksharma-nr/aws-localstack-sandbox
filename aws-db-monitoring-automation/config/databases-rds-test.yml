@@ -1,0 +1,72 @@
+# RDS Database Configuration
+newrelic_license_key: "test_license_key_40_characters_long_xxxxx"
+newrelic_account_id: "1234567"
+newrelic_region: "US"
+
+# RDS MySQL Databases
+mysql_databases:
+  - host: myapp-prod.cluster-xxxxx.us-east-1.rds.amazonaws.com
+    port: 3306
+    user: newrelic
+    password: "secure_mysql_password"
+    service_name: rds-mysql-prod
+    environment: production
+    extended_metrics: true
+    enable_query_monitoring: true
+    query_metrics_interval: 60s
+    interval: 30s
+    custom_labels:
+      application: myapp
+      tier: primary
+      region: us-east-1
+      db_engine: aurora-mysql
+
+  - host: myapp-replica.cluster-ro-xxxxx.us-east-1.rds.amazonaws.com
+    port: 3306
+    user: newrelic
+    password: "secure_mysql_password"
+    service_name: rds-mysql-replica
+    environment: production
+    extended_metrics: true
+    interval: 60s
+    custom_labels:
+      application: myapp
+      tier: replica
+      region: us-east-1
+      db_engine: aurora-mysql
+
+# RDS PostgreSQL Databases
+postgresql_databases:
+  - host: analytics-prod.cluster-xxxxx.us-east-1.rds.amazonaws.com
+    port: 5432
+    user: newrelic
+    password: "secure_pg_password"
+    database: analytics
+    service_name: rds-postgres-analytics
+    environment: production
+    sslmode: require
+    collect_bloat_metrics: true
+    collect_db_lock_metrics: true
+    enable_query_monitoring: true
+    query_metrics_interval: 60s
+    interval: 30s
+    custom_labels:
+      application: analytics
+      tier: primary
+      region: us-east-1
+      db_engine: aurora-postgresql
+
+  - host: reporting.xxxxx.us-east-1.rds.amazonaws.com
+    port: 5432
+    user: newrelic
+    password: "secure_pg_password"
+    database: reporting
+    service_name: rds-postgres-reporting
+    environment: production
+    sslmode: require
+    interval: 120s
+    custom_labels:
+      application: reporting
+      tier: secondary
+      region: us-east-1
+      db_engine: postgres

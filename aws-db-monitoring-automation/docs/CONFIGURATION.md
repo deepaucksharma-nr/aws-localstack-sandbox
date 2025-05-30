@@ -90,47 +90,16 @@ postgresql_databases:
       application: api
 ```
 
-## Environment Variables
-
-You can use environment variables instead of hardcoding:
-
-```yaml
-mysql_databases:
-  - host: ${MYSQL_HOST}
-    user: ${MYSQL_USER}
-    password: ${MYSQL_PASSWORD}
-```
-
-Then:
-```bash
-export MYSQL_HOST=mysql.example.com
-export MYSQL_USER=newrelic
-export MYSQL_PASSWORD=supersecret
-```
-
 ## Multiple Environments
 
-### Option 1: Separate config files
-```bash
-config/
-├── databases-prod.yml
-├── databases-staging.yml
-└── databases-dev.yml
-```
-
-Deploy with:
-```bash
-./scripts/deploy-monitoring.sh -c config/databases-prod.yml
-```
-
-### Option 2: Single file with all environments
 ```yaml
-# databases.yml
+# databases.yml with multiple environments
 mysql_databases:
   # Production
   - host: mysql-prod.example.com
     user: newrelic
     password: ${PROD_MYSQL_PASSWORD}
+    interval: 30s
     custom_labels:
       environment: production
       
@@ -138,57 +107,85 @@ mysql_databases:
   - host: mysql-staging.example.com
     user: newrelic
     password: ${STAGING_MYSQL_PASSWORD}
+    interval: 60s
     custom_labels:
       environment: staging
 ```
 
 ## Custom Metrics
 
-Add your own SQL queries:
+Add custom SQL queries by creating additional configuration:
 
-```yaml
-# custom-queries.yml
-queries:
-  - name: user_count
-    query: SELECT COUNT(*) as value FROM users
-    interval: 300s
-    
-  - name: order_backlog
-    query: |
-      SELECT COUNT(*) as value 
-      FROM orders 
-      WHERE status = 'pending' 
-      AND created_at < NOW() - INTERVAL 1 HOUR
-    interval: 60s
-```
-
-## Secrets Management
-
-### Using AWS Secrets Manager
 ```yaml
 mysql_databases:
   - host: mysql.example.com
     user: newrelic
-    password_from_secret: "arn:aws:secretsmanager:us-east-1:123456789:secret:db-password"
+    password: password
+    custom_metrics_config: |
+      queries:
+        - query: SELECT COUNT(*) as user_count FROM users
+          metric_name: app.users.total
+          metric_type: gauge
+        - query: SELECT COUNT(*) as pending_orders FROM orders WHERE status='pending'
+          metric_name: app.orders.pending
+          metric_type: gauge
 ```
 
-### Using AWS Parameter Store
+## Scaling Patterns
+
+### By Environment
+Deploy separate monitoring instances per environment:
+```bash
+# Production
+./scripts/deploy-monitoring.sh -c config/databases-prod.yml
+
+# Staging
+./scripts/deploy-monitoring.sh -c config/databases-staging.yml
+```
+
+### By Region
+Use Terraform workspaces:
+```bash
+terraform workspace new us-west-2
+terraform apply -var aws_region=us-west-2
+```
+
+### By Database Count
+- 1-20 databases: t3.small
+- 20-50 databases: t3.medium  
+- 50-100 databases: t3.large
+- 100+ databases: Deploy multiple instances
+
+## Security Hardening
+
+### Use IAM Roles for Secrets
+The EC2 instance has an IAM role that can access Secrets Manager and Parameter Store:
+
 ```yaml
+mysql_databases:
+  - host: mysql.example.com
+    user: newrelic
+    # Instead of hardcoding password:
+    password_from_secret: "/myapp/db/mysql/password"
+```
+
+### Enable TLS/SSL
+```yaml
+# MySQL with TLS
+mysql_databases:
+  - host: mysql.example.com
+    tls_enabled: true
+    tls_ca: /etc/ssl/certs/ca-bundle.crt
+
+# PostgreSQL with SSL
 postgresql_databases:
   - host: postgres.example.com
-    user: newrelic
-    password_from_parameter: "/myapp/db/password"
+    sslmode: require
 ```
 
-## Validation
-
-Check your config:
-```bash
-# Validate YAML syntax
-yamllint config/databases.yml
-
-# Test database connections
-./scripts/test-db-connection.sh \
-  --config config/databases.yml \
-  --validate-only
+### Restrict Network Access
+Update security groups to limit database access:
+```hcl
+# In terraform.tfvars
+allowed_ssh_cidr_blocks = ["10.0.0.0/16"]  # Only from VPC
 ```

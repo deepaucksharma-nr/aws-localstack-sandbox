@@ -70,6 +70,25 @@ psql -U postgres -f scripts/setup-postgresql-monitoring.sql
 
 Go to https://one.newrelic.com/infrastructure - your stuff should show up in a few minutes.
 
+## Verification Scripts
+
+We have several scripts to help verify your setup:
+
+```bash
+# Test database connections before deployment
+./scripts/test-db-connection.sh \
+  --mysql-host mysql.example.com \
+  --mysql-pass password
+
+# Verify the complete setup after deployment
+./scripts/setup-verification.sh --verbose
+
+# Validate query monitoring is working
+./scripts/validate-query-monitoring.sh \
+  --mysql-host mysql.example.com \
+  --mysql-pass password
+```
+
 ## Troubleshooting
 
 Not working? Check:

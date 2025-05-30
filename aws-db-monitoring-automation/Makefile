@@ -18,7 +18,8 @@ stop:
 	docker-compose down -v
 
 test: start
-	docker-compose exec test-runner /usr/local/bin/run-tests.sh all
+	@echo "Running tests inside container..."
+	docker-compose run --rm test-runner /usr/local/bin/run-tests.sh all
 	@make stop
 
 test-unit:

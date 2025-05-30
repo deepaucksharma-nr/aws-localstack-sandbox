@@ -75,16 +75,6 @@ make stop   # Clean up
 
 **Note:** This project is fully compatible with LocalStack Community Edition. No paid features required.
 
-### LocalStack Version
-We use LocalStack v3.0 for stability and Community Edition compatibility. To use a different version:
-```bash
-# Copy environment file
-cp .env.example .env
-
-# Edit LOCALSTACK_VERSION in .env
-vim .env
-```
-
 ## Common Issues
 
 **No data showing up?**
@@ -124,11 +114,12 @@ postgresql_databases:
     database: postgres
 ```
 
-## Advanced Stuff
+## Documentation
 
-- [Multiple regions setup](docs/SCALING.md)
-- [Custom metrics](docs/CUSTOM_METRICS.md)
-- [Security hardening](docs/SECURITY.md)
+- [Architecture](docs/ARCHITECTURE.md) - How it works
+- [Configuration Guide](docs/CONFIGURATION.md) - All configuration options
+- [Best Practices](docs/BEST_PRACTICES.md) - Security and scaling patterns
+- [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and fixes
 
 ## Contributing
 
