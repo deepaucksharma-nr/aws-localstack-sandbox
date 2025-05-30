@@ -1,0 +1,291 @@
+#!/usr/bin/env bash
+# PTE (Performance Telemetry Engine) - Unified command interface for AWS DB Monitoring
+
+set -euo pipefail
+
+# Version
+VERSION="2.0.0"
+
+# Script directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PTE_SCRIPT_DIR="$SCRIPT_DIR"  # Avoid variable collision
+
+# Source libraries
+source "${PTE_SCRIPT_DIR}/scripts/lib/common.sh"
+source "${PTE_SCRIPT_DIR}/scripts/lib/aws.sh"
+source "${PTE_SCRIPT_DIR}/scripts/lib/database.sh"
+source "${PTE_SCRIPT_DIR}/scripts/lib/validation.sh"
+
+# Show help
+show_help() {
+    cat << EOF
+PTE (Performance Telemetry Engine) v${VERSION}
+Unified command interface for AWS Database Monitoring Automation
+
+Usage: $(basename "$0") [COMMAND] [OPTIONS]
+
+Commands:
+    deploy       Deploy monitoring infrastructure
+    localstack   Manage LocalStack environment
+    database     Database connection and monitoring operations
+    validate     Validate configuration and prerequisites
+    test         Run tests
+    help         Show this help message
+    version      Show version information
+
+Options:
+    -h, --help      Show help for a command
+    -v, --version   Show version information
+
+Examples:
+    # Deploy monitoring infrastructure
+    $(basename "$0") deploy --key ~/.ssh/monitoring-key.pem
+
+    # Start LocalStack and initialize
+    $(basename "$0") localstack start
+    $(basename "$0") localstack init
+
+    # Test database connection
+    $(basename "$0") database test --type mysql --host localhost --port 3306
+
+    # Validate all prerequisites
+    $(basename "$0") validate all
+
+Run '$(basename "$0") COMMAND --help' for more information on a command.
+EOF
+}
+
+# Show version
+show_version() {
+    echo "PTE (Performance Telemetry Engine) v${VERSION}"
+    echo "AWS Database Monitoring Automation"
+}
+
+# Deploy command
+cmd_deploy() {
+    "${PTE_SCRIPT_DIR}/scripts/deploy.sh" "$@"
+}
+
+# LocalStack command
+cmd_localstack() {
+    local subcommand="${1:-help}"
+    shift || true
+    
+    case "$subcommand" in
+        start)
+            print_status "Starting LocalStack..."
+            docker-compose up -d localstack mysql-test postgres-test newrelic-mock
+            print_success "LocalStack started"
+            ;;
+        stop)
+            print_status "Stopping LocalStack..."
+            docker-compose down
+            print_success "LocalStack stopped"
+            ;;
+        init)
+            "${PTE_SCRIPT_DIR}/localstack/init.sh" "$@"
+            ;;
+        status)
+            print_status "Checking LocalStack status..."
+            if docker-compose ps | grep -q "localstack.*Up"; then
+                print_success "LocalStack is running"
+                docker-compose ps
+            else
+                print_error "LocalStack is not running"
+                exit 1
+            fi
+            ;;
+        help|--help|-h)
+            cat << EOF
+LocalStack Management Commands
+
+Usage: $(basename "$0") localstack [SUBCOMMAND] [OPTIONS]
+
+Subcommands:
+    start    Start LocalStack environment
+    stop     Stop LocalStack environment
+    init     Initialize AWS resources in LocalStack
+    status   Check LocalStack status
+
+Init Options:
+    --mode MODE    Initialization mode (basic, enhanced, full) [default: basic]
+
+Examples:
+    $(basename "$0") localstack start
+    $(basename "$0") localstack init --mode enhanced
+    $(basename "$0") localstack status
+EOF
+            ;;
+        *)
+            print_error "Unknown localstack subcommand: $subcommand"
+            cmd_localstack help
+            exit 1
+            ;;
+    esac
+}
+
+# Database command
+cmd_database() {
+    "${PTE_SCRIPT_DIR}/scripts/database.sh" "$@"
+}
+
+# Validate command
+cmd_validate() {
+    local target="${1:-help}"
+    shift || true
+    
+    case "$target" in
+        prerequisites|prereq)
+            validate_prerequisites
+            ;;
+        aws)
+            validate_aws_credentials
+            ;;
+        terraform|tf)
+            validate_terraform
+            ;;
+        ansible)
+            validate_ansible
+            ;;
+        all)
+            validate_prerequisites
+            validate_aws_credentials
+            validate_terraform
+            validate_ansible
+            print_success "All validations passed!"
+            ;;
+        help|--help|-h)
+            cat << EOF
+Validation Commands
+
+Usage: $(basename "$0") validate [TARGET]
+
+Targets:
+    prerequisites    Check required tools and dependencies
+    aws             Validate AWS credentials and access
+    terraform       Validate Terraform configuration
+    ansible         Validate Ansible setup
+    all             Run all validations
+
+Examples:
+    $(basename "$0") validate prerequisites
+    $(basename "$0") validate aws
+    $(basename "$0") validate all
+EOF
+            ;;
+        *)
+            print_error "Unknown validation target: $target"
+            cmd_validate help
+            exit 1
+            ;;
+    esac
+}
+
+# Test command
+cmd_test() {
+    local test_type="${1:-help}"
+    shift || true
+    
+    case "$test_type" in
+        unit)
+            print_status "Running unit tests..."
+            "${PTE_SCRIPT_DIR}/test/run-tests.sh" unit
+            ;;
+        integration)
+            print_status "Running integration tests..."
+            "${PTE_SCRIPT_DIR}/test/run-tests.sh" integration
+            ;;
+        e2e)
+            print_status "Running end-to-end tests..."
+            "${PTE_SCRIPT_DIR}/test/run-tests.sh" e2e
+            ;;
+        all)
+            print_status "Running all tests..."
+            "${PTE_SCRIPT_DIR}/test/run-tests.sh" all
+            ;;
+        report)
+            print_status "Generating test report..."
+            "${PTE_SCRIPT_DIR}/test/run-tests.sh" report "$@"
+            ;;
+        help|--help|-h)
+            cat << EOF
+Test Commands
+
+Usage: $(basename "$0") test [TYPE] [OPTIONS]
+
+Types:
+    unit         Run unit tests
+    integration  Run integration tests
+    e2e          Run end-to-end tests
+    all          Run all tests
+    report       Generate test report
+
+Report Options:
+    --output FILE    Output file for test report
+
+Examples:
+    $(basename "$0") test unit
+    $(basename "$0") test integration
+    $(basename "$0") test all
+    $(basename "$0") test report --output test-results/summary.txt
+EOF
+            ;;
+        *)
+            print_error "Unknown test type: $test_type"
+            cmd_test help
+            exit 1
+            ;;
+    esac
+}
+
+# Main function
+main() {
+    # Handle global options
+    case "${1:-}" in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -v|--version)
+            show_version
+            exit 0
+            ;;
+    esac
+    
+    # Get command
+    local command="${1:-help}"
+    shift || true
+    
+    # Route to command
+    case "$command" in
+        deploy)
+            cmd_deploy "$@"
+            ;;
+        localstack|ls)
+            cmd_localstack "$@"
+            ;;
+        database|db)
+            cmd_database "$@"
+            ;;
+        validate|val)
+            cmd_validate "$@"
+            ;;
+        test)
+            cmd_test "$@"
+            ;;
+        help)
+            show_help
+            ;;
+        version)
+            show_version
+            ;;
+        *)
+            print_error "Unknown command: $command"
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# Run main
+main "$@"

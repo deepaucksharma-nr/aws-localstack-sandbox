@@ -1,0 +1,30 @@
+# LocalStack Configuration Example
+# Copy this to terraform.localstack.tfvars and update values
+
+# AWS Configuration for LocalStack
+aws_region = "us-east-1"
+use_localstack = true
+localstack_endpoint = "http://localhost:4566"
+
+# These values will be populated by init-aws.sh
+# You can get them after running docker-compose up:
+# aws --endpoint-url=http://localhost:4566 ssm get-parameters-by-path --path /localstack --query 'Parameters[*].[Name,Value]' --output table
+
+vpc_id = "vpc-localstack"      # Will be created by init-aws.sh
+subnet_id = "subnet-localstack" # Will be created by init-aws.sh
+
+# SSH Key (mock for LocalStack)
+key_name = "test-key"
+
+# Monitoring Server Configuration
+monitoring_server_name = "localstack-monitoring"
+instance_type = "t3.micro"
+allowed_ssh_cidr_blocks = ["0.0.0.0/0"]
+
+# New Relic Configuration (use test values for LocalStack)
+newrelic_license_key = "test_license_key_123456789"
+newrelic_account_id = "1234567"
+newrelic_region = "US"
+
+# Optional: Override AMI ID (LocalStack will use mock AMI)
+# ami_id = "ami-localstack"

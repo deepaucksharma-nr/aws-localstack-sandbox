@@ -3,16 +3,16 @@
 
 data "aws_ssm_parameter" "vpc_id" {
   count = var.use_localstack ? 1 : 0
-  name  = "/test/vpc-id"
+  name  = "/localstack/vpc/id"
 }
 
 data "aws_ssm_parameter" "subnet_id" {
   count = var.use_localstack ? 1 : 0
-  name  = "/test/subnet-id"
+  name  = "/localstack/subnet/id"
 }
 
-# Override VPC and subnet IDs when using LocalStack
-locals {
-  vpc_id    = var.use_localstack ? data.aws_ssm_parameter.vpc_id[0].value : var.vpc_id
-  subnet_id = var.use_localstack ? data.aws_ssm_parameter.subnet_id[0].value : var.subnet_id
+data "aws_ssm_parameter" "security_group_id" {
+  count = var.use_localstack ? 1 : 0
+  name  = "/localstack/security-group/id"
 }
+

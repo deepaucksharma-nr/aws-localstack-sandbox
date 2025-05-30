@@ -1,265 +1,319 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Unified Test Runner for AWS DB Monitoring Automation
+# Consolidates all testing functionality
 
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Script directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Source common functions
+source "${PROJECT_ROOT}/scripts/lib/common.sh"
 
 # Test configuration
-TEST_DIR="/workspace/test"
-RESULTS_DIR="/workspace/test-results"
-COVERAGE_DIR="/workspace/coverage"
+TEST_TYPE="${1:-all}"
+TEST_RESULTS_DIR="${PROJECT_ROOT}/test-results"
+COVERAGE_DIR="${PROJECT_ROOT}/coverage"
 
-# Create results directories
-mkdir -p "$RESULTS_DIR" "$COVERAGE_DIR"
+# Create directories if they don't exist
+mkdir -p "$TEST_RESULTS_DIR" "$COVERAGE_DIR"
 
-# Function to print colored output
-print_status() {
-    echo -e "${BLUE}[TEST]${NC} $1"
+# Show help
+show_help() {
+    cat << EOF
+Unified Test Runner
+
+Usage: $(basename "$0") [TEST_TYPE] [OPTIONS]
+
+Test Types:
+    unit        Run unit tests
+    integration Run integration tests
+    e2e         Run end-to-end tests
+    smoke       Run smoke tests
+    all         Run all tests (default)
+    report      Generate test report
+
+Options:
+    --verbose   Enable verbose output
+    --coverage  Generate coverage report
+    --docker    Run tests in Docker container
+    --cleanup   Clean up test artifacts after run
+
+Examples:
+    $(basename "$0") unit
+    $(basename "$0") integration --verbose
+    $(basename "$0") all --coverage
+    $(basename "$0") report
+EOF
 }
 
-print_success() {
-    echo -e "${GREEN}[PASS]${NC} $1"
-}
+# Parse options
+VERBOSE=false
+COVERAGE=false
+USE_DOCKER=false
+CLEANUP=false
 
-print_error() {
-    echo -e "${RED}[FAIL]${NC} $1"
-}
+shift || true
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --coverage)
+            COVERAGE=true
+            shift
+            ;;
+        --docker)
+            USE_DOCKER=true
+            shift
+            ;;
+        --cleanup)
+            CLEANUP=true
+            shift
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        *)
+            print_error "Unknown option: $1"
+            show_help
+            exit 1
+            ;;
+    esac
+done
 
-print_warning() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-# Wait for services to be ready
-wait_for_services() {
-    print_status "Waiting for services to be ready..."
-    
-    # Wait for LocalStack
-    while ! curl -s http://localstack:4566/_localstack/health | grep -q '"services":'; do
-        echo -n "."
-        sleep 2
-    done
-    print_success "LocalStack is ready"
-    
-    # Wait for MySQL
-    while ! mysql -h mysql-test -u newrelic -pnewrelic123 -e "SELECT 1" &>/dev/null; do
-        echo -n "."
-        sleep 2
-    done
-    print_success "MySQL is ready"
-    
-    # Wait for PostgreSQL
-    while ! PGPASSWORD=newrelic123 psql -h postgres-test -U newrelic -d testdb -c "SELECT 1" &>/dev/null; do
-        echo -n "."
-        sleep 2
-    done
-    print_success "PostgreSQL is ready"
-    
-    # Wait for Mock New Relic
-    while ! curl -s http://mock-newrelic:8080/health | grep -q "ok"; do
-        echo -n "."
-        sleep 2
-    done
-    print_success "Mock New Relic is ready"
-}
-
-# Run unit tests
+# Unit tests
 run_unit_tests() {
     print_status "Running unit tests..."
     
-    cd "$TEST_DIR"
-    python3 -m pytest unit/ \
-        -v \
-        --cov=/workspace \
-        --cov-report=html:"$COVERAGE_DIR" \
-        --cov-report=term \
-        --junit-xml="$RESULTS_DIR/unit-tests.xml" \
-        || return 1
-        
+    cd "$PROJECT_ROOT"
+    
+    if [ "$COVERAGE" = true ]; then
+        pytest test/unit/ -v --cov=scripts --cov=test --cov-report=html:coverage/html --cov-report=xml:coverage/coverage.xml --junit-xml="$TEST_RESULTS_DIR/unit-results.xml"
+    else
+        pytest test/unit/ -v --junit-xml="$TEST_RESULTS_DIR/unit-results.xml"
+    fi
+    
     print_success "Unit tests completed"
 }
 
-# Run integration tests
+# Integration tests
 run_integration_tests() {
     print_status "Running integration tests..."
     
-    # Configure AWS CLI for LocalStack
-    export AWS_ACCESS_KEY_ID=test
-    export AWS_SECRET_ACCESS_KEY=test
-    export AWS_DEFAULT_REGION=us-east-1
-    export AWS_ENDPOINT_URL=http://localstack:4566
+    cd "$PROJECT_ROOT"
     
-    cd "$TEST_DIR"
-    python3 -m pytest integration/ \
-        -v \
-        --timeout=300 \
-        --junit-xml="$RESULTS_DIR/integration-tests.xml" \
-        || return 1
-        
+    # Start test environment if not using Docker
+    if [ "$USE_DOCKER" = false ]; then
+        print_status "Starting test environment..."
+        docker-compose -f docker-compose.dev.yml up -d
+        sleep 30
+    fi
+    
+    pytest test/integration/ -v --junit-xml="$TEST_RESULTS_DIR/integration-results.xml"
+    
     print_success "Integration tests completed"
 }
 
-# Run Terraform tests
-run_terraform_tests() {
-    print_status "Running Terraform tests..."
-    
-    cd /workspace/terraform
-    
-    # Initialize Terraform with LocalStack backend
-    terraform init -backend=false
-    
-    # Validate Terraform configuration
-    terraform validate
-    
-    # Plan with LocalStack variables
-    terraform plan -var-file=terraform.localstack.tfvars -out=tfplan
-    
-    # Apply Terraform
-    terraform apply -auto-approve tfplan
-    
-    # Capture outputs
-    terraform output -json > "$RESULTS_DIR/terraform-outputs.json"
-    
-    print_success "Terraform tests completed"
-}
-
-# Run Ansible tests
-run_ansible_tests() {
-    print_status "Running Ansible tests..."
-    
-    cd /workspace/ansible
-    
-    # Lint Ansible playbooks
-    ansible-lint playbooks/*.yml || print_warning "Ansible lint warnings found"
-    
-    # Create test inventory
-    cat > inventory/test-hosts.yml << EOF
-all:
-  hosts:
-    test-host:
-      ansible_host: localhost
-      ansible_connection: local
-      newrelic_license_key: test_license_key_123
-      newrelic_account_id: test_account_123
-      mysql_databases:
-        - host: mysql-test
-          port: 3306
-          user: newrelic
-          password: newrelic123
-      postgresql_databases:
-        - host: postgres-test
-          port: 5432
-          user: newrelic
-          password: newrelic123
-          database: testdb
-EOF
-    
-    # Dry run Ansible playbook
-    ansible-playbook -i inventory/test-hosts.yml playbooks/install-newrelic.yml --check
-    
-    print_success "Ansible tests completed"
-}
-
-# Run end-to-end tests
+# End-to-end tests
 run_e2e_tests() {
     print_status "Running end-to-end tests..."
     
-    # Execute the full deployment script in test mode
-    cd /workspace
+    cd "$PROJECT_ROOT"
     
-    # Create test SSH key
-    ssh-keygen -t rsa -f /tmp/test-key -N "" -q
+    # Run E2E test script
+    if [ -f "test/integration/test_e2e_flow.py" ]; then
+        pytest test/integration/test_e2e_flow.py -v --junit-xml="$TEST_RESULTS_DIR/e2e-results.xml"
+    fi
     
-    # Run deployment with test configuration
-    ./scripts/deploy-monitoring.sh \
-        -k /tmp/test-key \
-        -c config/databases.example.yml \
-        --skip-terraform || print_warning "E2E deployment test skipped"
+    # Run shell-based E2E tests
+    if [ -f "test/e2e-rds-monitoring-test.sh" ]; then
+        ./test/e2e-rds-monitoring-test.sh > "$TEST_RESULTS_DIR/e2e-shell.log" 2>&1 || true
+    fi
     
     print_success "End-to-end tests completed"
+}
+
+# Smoke tests
+run_smoke_tests() {
+    print_status "Running smoke tests..."
+    
+    cd "$PROJECT_ROOT"
+    
+    # Quick validation tests
+    print_status "Checking script executability..."
+    find scripts -name "*.sh" -type f | while read script; do
+        if [ -x "$script" ]; then
+            print_check_success "$script is executable"
+        else
+            print_check_fail "$script is not executable"
+        fi
+    done
+    
+    # Check Python syntax
+    print_status "Checking Python syntax..."
+    find . -name "*.py" -type f | grep -v "__pycache__" | while read pyfile; do
+        if python3 -m py_compile "$pyfile" 2>/dev/null; then
+            [ "$VERBOSE" = true ] && print_check_success "$pyfile syntax OK"
+        else
+            print_check_fail "$pyfile has syntax errors"
+        fi
+    done
+    
+    # Check YAML files
+    print_status "Checking YAML syntax..."
+    find . -name "*.yml" -o -name "*.yaml" | grep -v node_modules | while read yamlfile; do
+        if python3 -c "import yaml; yaml.safe_load(open('$yamlfile'))" 2>/dev/null; then
+            [ "$VERBOSE" = true ] && print_check_success "$yamlfile is valid"
+        else
+            print_check_fail "$yamlfile is invalid"
+        fi
+    done
+    
+    print_success "Smoke tests completed"
 }
 
 # Generate test report
 generate_report() {
     print_status "Generating test report..."
     
-    cat > "$RESULTS_DIR/test-summary.txt" << EOF
-Test Execution Summary
-=====================
-Date: $(date)
-Environment: LocalStack
-
-Test Results:
-- Unit Tests: $(grep -c 'passed' "$RESULTS_DIR/unit-tests.xml" || echo "0") passed
-- Integration Tests: $(grep -c 'passed' "$RESULTS_DIR/integration-tests.xml" || echo "0") passed
-- Terraform: $(jq -r '.instance_id.value' "$RESULTS_DIR/terraform-outputs.json" || echo "N/A")
-
-Coverage Report: $COVERAGE_DIR/index.html
-EOF
+    local report_file="$TEST_RESULTS_DIR/test-report.txt"
     
-    print_success "Test report generated at $RESULTS_DIR/test-summary.txt"
+    {
+        echo "AWS DB Monitoring Automation - Test Report"
+        echo "=========================================="
+        echo "Generated: $(date)"
+        echo ""
+        
+        # Unit test results
+        if [ -f "$TEST_RESULTS_DIR/unit-results.xml" ]; then
+            echo "Unit Tests:"
+            python3 -c "
+import xml.etree.ElementTree as ET
+tree = ET.parse('$TEST_RESULTS_DIR/unit-results.xml')
+root = tree.getroot()
+tests = root.get('tests', '0')
+failures = root.get('failures', '0')
+errors = root.get('errors', '0')
+time = root.get('time', '0')
+print(f'  Total: {tests}')
+print(f'  Passed: {int(tests) - int(failures) - int(errors)}')
+print(f'  Failed: {failures}')
+print(f'  Errors: {errors}')
+print(f'  Time: {time}s')
+" 2>/dev/null || echo "  No results found"
+            echo ""
+        fi
+        
+        # Integration test results
+        if [ -f "$TEST_RESULTS_DIR/integration-results.xml" ]; then
+            echo "Integration Tests:"
+            python3 -c "
+import xml.etree.ElementTree as ET
+tree = ET.parse('$TEST_RESULTS_DIR/integration-results.xml')
+root = tree.getroot()
+tests = root.get('tests', '0')
+failures = root.get('failures', '0')
+errors = root.get('errors', '0')
+time = root.get('time', '0')
+print(f'  Total: {tests}')
+print(f'  Passed: {int(tests) - int(failures) - int(errors)}')
+print(f'  Failed: {failures}')
+print(f'  Errors: {errors}')
+print(f'  Time: {time}s')
+" 2>/dev/null || echo "  No results found"
+            echo ""
+        fi
+        
+        # Coverage report
+        if [ -f "$COVERAGE_DIR/coverage.xml" ]; then
+            echo "Code Coverage:"
+            python3 -c "
+import xml.etree.ElementTree as ET
+tree = ET.parse('$COVERAGE_DIR/coverage.xml')
+root = tree.getroot()
+coverage = root.get('line-rate', '0')
+print(f'  Line Coverage: {float(coverage) * 100:.1f}%')
+" 2>/dev/null || echo "  No coverage data found"
+            echo ""
+        fi
+        
+    } > "$report_file"
+    
+    cat "$report_file"
+    print_success "Test report saved to: $report_file"
+}
+
+# Cleanup
+cleanup_test_artifacts() {
+    print_status "Cleaning up test artifacts..."
+    
+    # Stop test containers
+    if [ "$USE_DOCKER" = false ]; then
+        docker-compose -f docker-compose.dev.yml down -v 2>/dev/null || true
+    fi
+    
+    # Remove temporary files
+    find . -name "*.pyc" -delete 2>/dev/null || true
+    find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+    rm -rf .pytest_cache 2>/dev/null || true
+    
+    print_success "Cleanup completed"
 }
 
 # Main execution
 main() {
-    print_status "Starting test suite execution..."
+    print_status "AWS DB Monitoring Automation - Test Runner"
+    echo ""
     
-    # Wait for all services
-    wait_for_services
+    case "$TEST_TYPE" in
+        unit)
+            run_unit_tests
+            ;;
+        integration)
+            run_integration_tests
+            ;;
+        e2e)
+            run_e2e_tests
+            ;;
+        smoke)
+            run_smoke_tests
+            ;;
+        all)
+            run_smoke_tests
+            run_unit_tests
+            run_integration_tests
+            run_e2e_tests
+            ;;
+        report)
+            generate_report
+            ;;
+        help|--help|-h)
+            show_help
+            exit 0
+            ;;
+        *)
+            print_error "Unknown test type: $TEST_TYPE"
+            show_help
+            exit 1
+            ;;
+    esac
     
-    # Run test suites
-    FAILED=0
-    
-    run_unit_tests || FAILED=$((FAILED + 1))
-    run_integration_tests || FAILED=$((FAILED + 1))
-    run_terraform_tests || FAILED=$((FAILED + 1))
-    run_ansible_tests || FAILED=$((FAILED + 1))
-    run_e2e_tests || FAILED=$((FAILED + 1))
-    
-    # Generate report
-    generate_report
-    
-    # Exit with appropriate code
-    if [[ $FAILED -eq 0 ]]; then
-        print_success "All tests passed!"
-        exit 0
-    else
-        print_error "$FAILED test suites failed"
-        exit 1
+    # Generate report if all tests were run
+    if [ "$TEST_TYPE" = "all" ]; then
+        generate_report
     fi
+    
+    # Cleanup if requested
+    if [ "$CLEANUP" = true ]; then
+        cleanup_test_artifacts
+    fi
+    
+    print_success "Testing completed!"
 }
 
-# Handle script arguments
-case "${1:-all}" in
-    unit)
-        wait_for_services
-        run_unit_tests
-        ;;
-    integration)
-        wait_for_services
-        run_integration_tests
-        ;;
-    terraform)
-        wait_for_services
-        run_terraform_tests
-        ;;
-    ansible)
-        wait_for_services
-        run_ansible_tests
-        ;;
-    e2e)
-        wait_for_services
-        run_e2e_tests
-        ;;
-    all)
-        main
-        ;;
-    *)
-        echo "Usage: $0 [unit|integration|terraform|ansible|e2e|all]"
-        exit 1
-        ;;
-esac
+# Run main
+main

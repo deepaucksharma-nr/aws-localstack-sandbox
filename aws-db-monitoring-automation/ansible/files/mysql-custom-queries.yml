@@ -1,0 +1,121 @@
+queries:
+  # Query Performance Metrics from Performance Schema
+  - name: mysql_query_performance
+    query: |
+      SELECT 
+        DIGEST_TEXT as query_pattern,
+        SCHEMA_NAME as database_name,
+        COUNT_STAR as execution_count,
+        SUM_TIMER_WAIT/1000000000000 as total_time_sec,
+        AVG_TIMER_WAIT/1000000000 as avg_time_ms,
+        MAX_TIMER_WAIT/1000000000 as max_time_ms,
+        MIN_TIMER_WAIT/1000000000 as min_time_ms,
+        SUM_ROWS_EXAMINED as total_rows_examined,
+        SUM_ROWS_SENT as total_rows_sent,
+        SUM_ROWS_AFFECTED as total_rows_affected,
+        SUM_CREATED_TMP_DISK_TABLES as tmp_disk_tables,
+        SUM_CREATED_TMP_TABLES as tmp_tables,
+        SUM_SELECT_FULL_JOIN as full_joins,
+        SUM_SELECT_SCAN as full_scans,
+        SUM_SORT_MERGE_PASSES as sort_merge_passes,
+        SUM_NO_INDEX_USED as no_index_used_count,
+        SUM_NO_GOOD_INDEX_USED as no_good_index_used_count,
+        FIRST_SEEN,
+        LAST_SEEN
+      FROM performance_schema.events_statements_summary_by_digest
+      WHERE DIGEST_TEXT IS NOT NULL
+        AND SCHEMA_NAME NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+      ORDER BY total_time_sec DESC
+      LIMIT 100
+    metric_name: query_performance
+    value_type: attribute
+    
+  # Table I/O Statistics
+  - name: mysql_table_io_stats
+    query: |
+      SELECT 
+        OBJECT_SCHEMA as database_name,
+        OBJECT_NAME as table_name,
+        COUNT_READ as read_count,
+        COUNT_WRITE as write_count,
+        COUNT_FETCH as fetch_count,
+        COUNT_INSERT as insert_count,
+        COUNT_UPDATE as update_count,
+        COUNT_DELETE as delete_count,
+        SUM_TIMER_READ/1000000000 as total_read_time_ms,
+        SUM_TIMER_WRITE/1000000000 as total_write_time_ms,
+        AVG_TIMER_READ/1000000000 as avg_read_time_ms,
+        AVG_TIMER_WRITE/1000000000 as avg_write_time_ms
+      FROM performance_schema.table_io_waits_summary_by_table
+      WHERE OBJECT_SCHEMA NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+      ORDER BY (COUNT_READ + COUNT_WRITE) DESC
+      LIMIT 50
+    metric_name: table_io
+    value_type: attribute
+    
+  # Index Usage Statistics
+  - name: mysql_index_usage
+    query: |
+      SELECT 
+        OBJECT_SCHEMA as database_name,
+        OBJECT_NAME as table_name,
+        INDEX_NAME,
+        COUNT_READ as read_count,
+        COUNT_FETCH as fetch_count,
+        SUM_TIMER_READ/1000000000 as total_read_time_ms,
+        AVG_TIMER_READ/1000000000 as avg_read_time_ms
+      FROM performance_schema.table_io_waits_summary_by_index_usage
+      WHERE OBJECT_SCHEMA NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+        AND INDEX_NAME IS NOT NULL
+      ORDER BY read_count DESC
+      LIMIT 50
+    metric_name: index_usage
+    value_type: attribute
+    
+  # Connection Statistics
+  - name: mysql_connection_stats
+    query: |
+      SELECT 
+        USER,
+        HOST,
+        CURRENT_CONNECTIONS,
+        TOTAL_CONNECTIONS,
+        CONCURRENT_CONNECTIONS as max_concurrent_connections
+      FROM performance_schema.accounts
+      WHERE USER IS NOT NULL
+    metric_name: connection_stats
+    value_type: attribute
+    
+  # Wait Events
+  - name: mysql_wait_events
+    query: |
+      SELECT 
+        EVENT_NAME,
+        COUNT_STAR as event_count,
+        SUM_TIMER_WAIT/1000000000000 as total_wait_time_sec,
+        AVG_TIMER_WAIT/1000000000 as avg_wait_time_ms,
+        MAX_TIMER_WAIT/1000000000 as max_wait_time_ms
+      FROM performance_schema.events_waits_summary_global_by_event_name
+      WHERE COUNT_STAR > 0
+        AND EVENT_NAME NOT LIKE 'idle%'
+      ORDER BY total_wait_time_sec DESC
+      LIMIT 20
+    metric_name: wait_events
+    value_type: attribute
+    
+  # Lock Statistics
+  - name: mysql_lock_stats
+    query: |
+      SELECT 
+        OBJECT_SCHEMA as database_name,
+        OBJECT_NAME as table_name,
+        COUNT_STAR as lock_count,
+        SUM_TIMER_WAIT/1000000000 as total_lock_time_ms,
+        AVG_TIMER_WAIT/1000000000 as avg_lock_time_ms
+      FROM performance_schema.table_lock_waits_summary_by_table
+      WHERE OBJECT_SCHEMA NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')
+        AND COUNT_STAR > 0
+      ORDER BY total_lock_time_ms DESC
+      LIMIT 20
+    metric_name: lock_stats
+    value_type: attribute

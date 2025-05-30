@@ -1,0 +1,35 @@
+mysql_databases:
+  - name: test-mysql-local
+    type: mysql
+    enabled: true
+    provider: container
+    connection:
+      host: localhost
+      port: 3306
+    credentials:
+      user_source: plain
+      user: newrelic
+      password_source: plain
+      password: test123
+    monitoring:
+      extended_metrics: true
+      interval: 30s
+
+postgresql_databases:
+  - name: test-postgres-local
+    type: postgresql
+    enabled: true
+    provider: container
+    connection:
+      host: localhost
+      port: 5432
+      database: testdb
+      ssl_mode: disable
+    credentials:
+      user_source: plain
+      user: newrelic
+      password_source: plain
+      password: test123
+    monitoring:
+      extended_metrics: true
+      interval: 30s

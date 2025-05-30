@@ -1,59 +1,72 @@
+# Use specific Ubuntu version
 FROM ubuntu:22.04
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    wget \
-    git \
-    python3 \
-    python3-pip \
-    software-properties-common \
-    gnupg \
-    lsb-release \
-    openssh-client \
-    mysql-client \
-    postgresql-client \
-    jq \
-    && rm -rf /var/lib/apt/lists/*
+# Set non-interactive frontend
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Install Terraform
-RUN wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list \
-    && apt-get update && apt-get install -y terraform
+# Install dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        unzip \
+        git \
+        openssh-client \
+        python3 \
+        python3-pip \
+        python3-venv \
+        jq \
+        mysql-client \
+        postgresql-client \
+        ca-certificates && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install Ansible
-RUN pip3 install ansible ansible-lint
+# Create non-root user
+RUN groupadd -r testuser -g 1001 && \
+    useradd -r -g testuser -u 1001 -m -s /bin/bash testuser
 
-# Install AWS CLI
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
-    && unzip awscliv2.zip \
-    && ./aws/install \
-    && rm -rf awscliv2.zip aws/
+# Set up Python virtual environment
+USER testuser
+WORKDIR /home/testuser
 
-# Install testing frameworks
-RUN pip3 install \
-    pytest \
-    pytest-cov \
-    pytest-xdist \
-    pytest-timeout \
-    boto3 \
-    requests \
-    pyyaml \
-    paramiko
+# Create and activate virtual environment
+RUN python3 -m venv /home/testuser/venv
+ENV PATH="/home/testuser/venv/bin:$PATH"
 
-# Set working directory
-WORKDIR /workspace
+# Install Python packages with hash verification
+COPY --chown=testuser:testuser test/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && \
+    rm /tmp/requirements.txt
 
-# Copy test requirements
-COPY test/requirements.txt /tmp/
-RUN pip3 install -r /tmp/requirements.txt || true
+# Install Terraform with signature verification
+USER root
+RUN curl -fsSL https://releases.hashicorp.com/terraform/1.6.5/terraform_1.6.5_linux_amd64.zip \
+        -o terraform.zip && \
+    curl -fsSL https://releases.hashicorp.com/terraform/1.6.5/terraform_1.6.5_SHA256SUMS \
+        -o terraform_SHA256SUMS && \
+    grep linux_amd64 terraform_SHA256SUMS | sha256sum -c && \
+    unzip terraform.zip -d /usr/local/bin/ && \
+    rm terraform.zip terraform_SHA256SUMS && \
+    chmod 755 /usr/local/bin/terraform
+
+# Install AWS CLI v2 with signature verification
+RUN curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip.sig" -o "awscliv2.sig" && \
+    unzip -q awscliv2.zip && \
+    ./aws/install && \
+    rm -rf awscliv2.zip awscliv2.sig aws/
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV ANSIBLE_HOST_KEY_CHECKING=False
+ENV AWS_DEFAULT_REGION=us-east-1
 
-# Create test runner script
-COPY test/run-tests.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/run-tests.sh
+# Create working directory
+RUN mkdir -p /app && chown testuser:testuser /app
+WORKDIR /app
 
-ENTRYPOINT ["/bin/bash"]
+# Switch to non-root user
+USER testuser
+
+# Default command
+CMD ["/bin/bash"]

@@ -1,0 +1,32 @@
+newrelic:
+  license_key: test-license-key
+  account_id: 12345
+
+mysql:
+  - name: docker-mysql
+    host: test-mysql-2
+    port: 3306
+    user: newrelic
+    credentials:
+      type: plaintext
+      password: newrelic123
+    monitoring:
+      service_name: docker-mysql-test
+      environment: test
+      extended_metrics: true
+      interval: 30s
+
+postgresql:
+  - name: docker-postgres
+    host: test-postgres-2
+    port: 5432
+    user: postgres
+    database: testdb
+    credentials:
+      type: plaintext
+      password: postgres123
+    monitoring:
+      service_name: docker-postgres-test
+      environment: test
+      extended_metrics: true
+      interval: 30s

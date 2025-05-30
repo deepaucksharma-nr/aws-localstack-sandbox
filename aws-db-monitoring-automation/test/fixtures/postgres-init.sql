@@ -4,8 +4,7 @@
 -- Create monitoring user
 CREATE USER newrelic WITH PASSWORD 'newrelic123';
 
--- Create test database
-CREATE DATABASE testdb;
+-- Create additional test database (testdb is created by POSTGRES_DB env var)
 CREATE DATABASE analytics;
 
 -- Connect to testdb

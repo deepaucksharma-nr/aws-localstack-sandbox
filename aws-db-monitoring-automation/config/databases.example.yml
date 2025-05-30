@@ -1,112 +1,206 @@
----
-# New Relic Database Monitoring Configuration
-# Copy this to databases.yml and update with your actual database details
+# Enhanced database configuration supporting multiple providers
+# This configuration supports containers, RDS, Aurora, and EC2-hosted databases
 
-# New Relic Configuration
-newrelic_license_key: "YOUR_NEWRELIC_LICENSE_KEY"
-newrelic_account_id: "YOUR_ACCOUNT_ID"
-newrelic_region: "US"  # US or EU
+# Global settings
+global:
+  monitoring:
+    interval: 30
+    timeout: 10
+    batch_limit: 200
 
-# Environment settings
-environment: production
-aws_region: us-east-1
-
-# Custom attributes for all monitored resources
-custom_attributes:
-  team: database-team
-  cost_center: engineering
-
-# MySQL Databases
-mysql_databases:
-  - host: mysql-prod-01.example.com
-    port: 3306
-    user: newrelic
-    password: "secure_password_here"
-    service_name: mysql-prod-webapp
-    environment: production
-    extended_metrics: true
-    interval: 30s
-    # Query performance monitoring settings
-    enable_query_monitoring: true
-    query_metrics_interval: 60s
-    max_sql_query_length: 1000
-    gather_query_samples: true
-    custom_labels:
-      application: webapp
-      tier: primary
-      region: us-east-1
-    tls_enabled: true
+# Database definitions
+databases:
+  # Example 1: Container-based MySQL (for local development)
+  - name: "dev-mysql-container"
+    enabled: true
+    type: "mysql"
+    provider: "container"
     
-  - host: mysql-prod-02.example.com
-    port: 3306
-    user: newrelic
-    password: "another_password"
-    service_name: mysql-prod-analytics
-    environment: production
-    extended_metrics: true
-    custom_labels:
-      application: analytics
-      tier: replica
-      region: us-east-1
-
-  - host: mysql-dev.example.com
-    port: 3306
-    user: newrelic
-    password: "dev_password"
-    service_name: mysql-dev
-    environment: development
-    extended_metrics: false
-    interval: 60s
-    custom_labels:
-      application: webapp
-      tier: development
-
-# PostgreSQL Databases
-postgresql_databases:
-  - host: postgres-prod-01.example.com
-    port: 5432
-    user: newrelic
-    password: "pg_secure_password"
-    database: production_db
-    service_name: postgres-prod-main
-    environment: production
-    sslmode: require
-    collect_bloat_metrics: true
-    collect_db_lock_metrics: true
-    interval: 30s
-    # Query performance monitoring settings
-    enable_query_monitoring: true
-    query_metrics_interval: 60s
-    max_sql_query_length: 1000
-    # Note: Requires pg_stat_statements extension and proper permissions
-    custom_labels:
-      application: main-app
-      tier: primary
-      region: us-east-1
+    connection:
+      host: "mysql"
+      port: 3306
+      
+    credentials:
+      username: "newrelic"
+      password: "nr_password123"  # Plain text for dev only
+      
+    monitoring:
+      collect_inventory: true
+      extended_metrics: true
+      custom_metrics_query: |
+        SELECT 
+          COUNT(*) as active_connections 
+        FROM 
+          information_schema.processlist 
+        WHERE 
+          command != 'Sleep'
     
-  - host: postgres-analytics.example.com
-    port: 5432
-    user: newrelic
-    password: "analytics_password"
-    database: analytics
-    service_name: postgres-analytics
-    environment: production
-    sslmode: prefer
-    collection_list: "ALL"
-    custom_labels:
-      application: data-warehouse
-      tier: analytics
-      region: us-west-2
+    labels:
+      environment: "development"
+      team: "platform"
+      
+  # Example 2: RDS MySQL Instance
+  - name: "prod-mysql-rds"
+    enabled: true
+    type: "mysql"
+    provider: "rds"
+    
+    connection:
+      # For RDS, use the endpoint instead of host
+      endpoint: "mydb-instance.abc123xyz.us-east-1.rds.amazonaws.com"
+      port: 3306
+      
+    credentials:
+      username: "newrelic"
+      # For production, use AWS Secrets Manager
+      password_source: "aws_secrets_manager"
+      password_key: "/prod/rds/mysql/newrelic-password"
+      
+    monitoring:
+      collect_inventory: true
+      extended_metrics: true
+      # RDS-specific metrics
+      collect_rds_metrics: true
+      cloudwatch_namespace: "AWS/RDS"
+      
+    tls:
+      enabled: true
+      ca_bundle_file: "/opt/newrelic/certs/rds-ca-2019-root.pem"
+      
+    labels:
+      environment: "production"
+      team: "platform"
+      service: "api"
+      
+  # Example 3: Aurora MySQL Cluster
+  - name: "prod-aurora-mysql"
+    enabled: true
+    type: "mysql"
+    provider: "aurora"
+    
+    connection:
+      # For Aurora, use cluster endpoint for writes
+      cluster_endpoint: "mydb-cluster.cluster-abc123xyz.us-east-1.rds.amazonaws.com"
+      # Reader endpoint for read replicas
+      reader_endpoint: "mydb-cluster.cluster-ro-abc123xyz.us-east-1.rds.amazonaws.com"
+      port: 3306
+      
+    credentials:
+      username: "newrelic"
+      password_source: "aws_ssm_parameter"
+      password_key: "/prod/aurora/mysql/newrelic-password"
+      
+    monitoring:
+      collect_inventory: true
+      extended_metrics: true
+      collect_aurora_metrics: true
+      # Monitor both writer and reader endpoints
+      monitor_readers: true
+      
+    tls:
+      enabled: true
+      verify_server_certificate: true
+      
+    labels:
+      environment: "production"
+      team: "data"
+      cluster_type: "aurora-mysql"
+      
+  # Example 4: PostgreSQL on EC2
+  - name: "staging-postgres-ec2"
+    enabled: true
+    type: "postgresql"
+    provider: "ec2"
+    
+    connection:
+      host: "10.0.1.50"  # Private IP
+      port: 5432
+      database: "app_db"
+      
+    credentials:
+      username: "newrelic"
+      password_source: "env_var"
+      password_env: "POSTGRES_NR_PASSWORD"
+      
+    monitoring:
+      collect_inventory: true
+      extended_metrics: true
+      collect_bloat_metrics: true
+      collect_db_lock_metrics: true
+      
+    labels:
+      environment: "staging"
+      team: "platform"
+      
+  # Example 5: Aurora PostgreSQL
+  - name: "prod-aurora-postgres"
+    enabled: false  # Can be toggled
+    type: "postgresql"
+    provider: "aurora"
+    
+    connection:
+      cluster_endpoint: "pg-cluster.cluster-abc123xyz.us-west-2.rds.amazonaws.com"
+      reader_endpoint: "pg-cluster.cluster-ro-abc123xyz.us-west-2.rds.amazonaws.com"
+      port: 5432
+      database: "production"
+      ssl_mode: "require"
+      
+    credentials:
+      username: "newrelic_monitor"
+      password_source: "aws_secrets_manager"
+      password_key: "/prod/aurora/postgresql/monitor"
+      region: "us-west-2"  # Specific region for secrets
+      
+    monitoring:
+      collect_inventory: true
+      extended_metrics: true
+      collect_aurora_metrics: true
+      monitor_readers: true
+      pgbouncer_metrics: false
+      
+    tls:
+      enabled: true
+      ca_bundle_file: "/opt/newrelic/certs/rds-ca-2019-root.pem"
+      
+    labels:
+      environment: "production"
+      region: "us-west-2"
+      ha_enabled: "true"
 
-  - host: postgres-dev.example.com
-    port: 5432
-    user: newrelic
-    password: "dev_pg_password"
-    database: development
-    service_name: postgres-dev
-    environment: development
-    sslmode: disable
-    interval: 60s
-    custom_labels:
-      application: all
-      tier: development
+# Provider-specific defaults
+provider_defaults:
+  rds:
+    tls:
+      enabled: true
+      ca_bundle_file: "/opt/newrelic/certs/rds-ca-2019-root.pem"
+    monitoring:
+      collect_rds_metrics: true
+      
+  aurora:
+    tls:
+      enabled: true
+      verify_server_certificate: true
+    monitoring:
+      collect_aurora_metrics: true
+      monitor_readers: true
+      
+  container:
+    tls:
+      enabled: false
+    monitoring:
+      interval: 15  # More frequent for dev
+
+# Discovery configuration (optional)
+discovery:
+  enabled: false
+  providers:
+    - type: "rds"
+      regions: ["us-east-1", "us-west-2"]
+      tag_filters:
+        - key: "monitor"
+          value: "newrelic"
+    - type: "aurora"
+      regions: ["us-east-1", "us-west-2"]
+      tag_filters:
+        - key: "monitor"
+          value: "newrelic"

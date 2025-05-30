@@ -34,7 +34,12 @@ variable "monitoring_server_name" {
 variable "allowed_ssh_cidr_blocks" {
   description = "CIDR blocks allowed to SSH into the instance"
   type        = list(string)
-  default     = ["0.0.0.0/0"]
+  validation {
+    condition = alltrue([
+      for cidr in var.allowed_ssh_cidr_blocks : can(cidrhost(cidr, 0))
+    ])
+    error_message = "All values must be valid CIDR blocks."
+  }
 }
 
 variable "ami_id" {
@@ -58,4 +63,46 @@ variable "newrelic_region" {
   description = "New Relic region (US or EU)"
   type        = string
   default     = "US"
+}
+
+variable "allowed_http_cidr_blocks" {
+  description = "CIDR blocks allowed to access HTTP/HTTPS ports"
+  type        = list(string)
+  default     = []
+  validation {
+    condition = alltrue([
+      for cidr in var.allowed_http_cidr_blocks : can(cidrhost(cidr, 0))
+    ])
+    error_message = "All values must be valid CIDR blocks."
+  }
+}
+
+variable "enable_https" {
+  description = "Enable HTTPS access to monitoring UI"
+  type        = bool
+  default     = false
+}
+
+variable "enable_http" {
+  description = "Enable HTTP access to monitoring UI (not recommended for production)"
+  type        = bool
+  default     = false
+}
+
+variable "unique_identifier" {
+  description = "Unique identifier to prevent resource naming conflicts"
+  type        = string
+  default     = ""
+}
+
+variable "use_localstack" {
+  description = "Whether to use LocalStack for local testing"
+  type        = bool
+  default     = false
+}
+
+variable "localstack_endpoint" {
+  description = "LocalStack endpoint URL"
+  type        = string
+  default     = "http://localhost:4566"
 }

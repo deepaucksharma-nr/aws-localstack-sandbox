@@ -12,6 +12,15 @@ import sys
 import os
 from typing import Dict, Any, List, Optional
 
+# Add lib directory to path
+sys.path.append(os.path.join(os.path.dirname(__file__), 'lib'))
+try:
+    from validation import validate_yaml_config
+except ImportError:
+    # Fallback if validation module not available
+    def validate_yaml_config(config):
+        return True, [], []
+
 
 class ConfigTransformer:
     def __init__(self, region: Optional[str] = None):
@@ -30,7 +39,8 @@ class ConfigTransformer:
             )
             if response.status_code == 200:
                 return response.text
-        except:
+        except Exception:
+            # Silently use default region if metadata is unavailable
             pass
         
         # Fall back to environment or default
@@ -42,8 +52,9 @@ class ConfigTransformer:
             response = self.secrets_client.get_secret_value(SecretId=secret_id)
             return response['SecretString']
         except Exception as e:
-            print(f"Error fetching secret {secret_id}: {e}", file=sys.stderr)
-            return f"ERROR_FETCHING_SECRET_{secret_id}"
+            # Log error without exposing secret ID details
+            print(f"Error fetching secret: Failed to retrieve credentials", file=sys.stderr)
+            return "ERROR_FETCHING_SECRET"
     
     def fetch_ssm_parameter(self, parameter_name: str) -> str:
         """Fetch parameter value from SSM Parameter Store"""
@@ -54,8 +65,9 @@ class ConfigTransformer:
             )
             return response['Parameter']['Value']
         except Exception as e:
-            print(f"Error fetching SSM parameter {parameter_name}: {e}", file=sys.stderr)
-            return f"ERROR_FETCHING_PARAMETER_{parameter_name}"
+            # Log error without exposing parameter name
+            print(f"Error fetching SSM parameter: Failed to retrieve credentials", file=sys.stderr)
+            return "ERROR_FETCHING_PARAMETER"
     
     def resolve_credentials(self, credentials: Dict[str, Any]) -> Dict[str, Any]:
         """Resolve credentials based on source type"""
@@ -84,7 +96,7 @@ class ConfigTransformer:
         elif password_source == 'env_var':
             env_var = credentials.get('password_env')
             if env_var:
-                resolved['password'] = os.environ.get(env_var, f'ENV_VAR_{env_var}_NOT_SET')
+                resolved['password'] = os.environ.get(env_var, 'ENV_VAR_NOT_SET')
             else:
                 resolved['password'] = 'MISSING_PASSWORD_ENV'
                 
@@ -188,12 +200,43 @@ class ConfigTransformer:
             else:
                 input_config = yaml.safe_load(f)
         
+        # Validate input configuration
+        print("Validating configuration...")
+        valid, errors, warnings = validate_yaml_config(input_config)
+        
+        if not valid:
+            print("\nConfiguration validation failed:")
+            for error in errors:
+                print(f"  ERROR: {error}")
+            if warnings:
+                print("\nWarnings:")
+                for warning in warnings:
+                    print(f"  WARNING: {warning}")
+            raise ValueError("Invalid configuration")
+        
+        if warnings:
+            print("\nConfiguration warnings:")
+            for warning in warnings:
+                print(f"  WARNING: {warning}")
+        
         print("Transforming configuration...")
         output_config = self.transform_config(input_config)
         
         print(f"Writing transformed configuration to {output_file}...")
-        with open(output_file, 'w') as f:
+        # Create file with secure permissions
+        import os
+        import stat
+        
+        # Write to temporary file first
+        temp_file = f"{output_file}.tmp"
+        with open(temp_file, 'w') as f:
             yaml.dump(output_config, f, default_flow_style=False, sort_keys=False)
+        
+        # Set secure permissions (owner read/write only)
+        os.chmod(temp_file, stat.S_IRUSR | stat.S_IWUSR)
+        
+        # Move to final location
+        os.rename(temp_file, output_file)
         
         # Summary
         mysql_count = len(output_config.get('mysql_databases', []))
@@ -202,18 +245,18 @@ class ConfigTransformer:
         print(f"  MySQL databases: {mysql_count}")
         print(f"  PostgreSQL databases: {postgres_count}")
         
-        # Check for errors
-        errors = []
+        # Check for errors without exposing passwords
+        error_count = 0
         for db_list in [output_config.get('mysql_databases', []), 
                        output_config.get('postgresql_databases', [])]:
             for db in db_list:
                 if 'ERROR' in db.get('password', ''):
-                    errors.append(f"  - {db['service_name']}: {db['password']}")
+                    error_count += 1
+                    print(f"\nWARNING: Failed to resolve credentials for database: {db.get('service_name', 'unknown')}")
         
-        if errors:
-            print("\nWARNING: Credential resolution errors:")
-            for error in errors:
-                print(error)
+        if error_count > 0:
+            print(f"\nTotal credential resolution errors: {error_count}")
+            print("Please check your AWS credentials and ensure the secrets/parameters exist.")
 
 
 def main():

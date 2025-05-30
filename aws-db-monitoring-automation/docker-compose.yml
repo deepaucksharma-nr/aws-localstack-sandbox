@@ -1,112 +1,187 @@
 version: '3.8'
 
 services:
-  # LocalStack for AWS services simulation
   localstack:
-    image: localstack/localstack:${LOCALSTACK_VERSION:-3.0}  # Using stable version compatible with Community Edition
-    container_name: localstack
+    image: localstack/localstack:3.0.2
     ports:
-      - "4566:4566"              # LocalStack Gateway
+      - "127.0.0.1:4566:4566"
     environment:
-      - SERVICES=ec2,sts,iam,ssm,secretsmanager
-      - DEBUG=1
-      - DATA_DIR=/tmp/localstack/data
-      - AWS_DEFAULT_REGION=us-east-1
+      - DEBUG=${DEBUG:-0}
+      - SERVICES=ec2,iam,secretsmanager,ssm,cloudwatch,kms,rds,sts
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - LOCALSTACK_API_KEY=${LOCALSTACK_API_KEY:-}
     volumes:
-      - "${TMPDIR:-/tmp}/localstack:/tmp/localstack"
-      - "./localstack/init-aws.sh:/docker-entrypoint-initaws.d/init-aws.sh"
+      - "./localstack:/docker-entrypoint-initaws.d"
+      - "localstack_data:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"  # Read-only access
     networks:
-      - monitoring-network
+      - monitoring
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    user: "${UID:-1000}:${GID:-1000}"
 
-  # MySQL test database
   mysql-test:
-    image: mysql:8.0
-    container_name: mysql-test
+    image: mysql:8.0.35
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     environment:
-      - MYSQL_ROOT_PASSWORD=rootpassword
-      - MYSQL_DATABASE=testdb
-      - MYSQL_USER=newrelic
-      - MYSQL_PASSWORD=newrelic123
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+      MYSQL_USER: ${MYSQL_USER:-newrelic}
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_password
     volumes:
-      - mysql-data:/var/lib/mysql
-      - ./test/fixtures/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql
+      - "./test/fixtures/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro"
+      - "mysql_data:/var/lib/mysql"
+    networks:
+      - monitoring
+    secrets:
+      - mysql_root_password
+      - mysql_password
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      timeout: 20s
-      retries: 10
-    networks:
-      - monitoring-network
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/mysqld
 
-  # PostgreSQL test database
   postgres-test:
-    image: postgres:15
-    container_name: postgres-test
+    image: postgres:15.5
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres123
-      - POSTGRES_DB=testdb
+      POSTGRES_DB: ${POSTGRES_DB:-testdb}
+      POSTGRES_USER: ${POSTGRES_USER:-newrelic}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./test/fixtures/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - "./test/fixtures/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro"
+      - "postgres_data:/var/lib/postgresql/data"
     networks:
-      - monitoring-network
+      - monitoring
+    secrets:
+      - postgres_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-newrelic}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/postgresql
 
-  # Mock New Relic API server
-  mock-newrelic:
+  newrelic-mock:
     build:
       context: ./mock-services
       dockerfile: Dockerfile.newrelic
-    container_name: mock-newrelic
+    image: db-monitoring/newrelic-mock:latest
     ports:
-      - "8080:8080"  # Mock API endpoint
-      - "8081:8081"  # Mock Infrastructure endpoint
+      - "127.0.0.1:8081:8081"
     environment:
-      - NODE_ENV=test
-    volumes:
-      - ./mock-services:/app
+      - NODE_ENV=production
     networks:
-      - monitoring-network
+      - monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    user: "node"
+    read_only: true
+    tmpfs:
+      - /tmp
 
-  # Test runner container
   test-runner:
     build:
       context: .
       dockerfile: Dockerfile.test
-    container_name: test-runner
-    depends_on:
-      - localstack
-      - mysql-test
-      - postgres-test
-      - mock-newrelic
+    image: db-monitoring/test-runner:latest
     environment:
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
-      - AWS_DEFAULT_REGION=us-east-1
-      - LOCALSTACK_ENDPOINT=http://localstack:4566
+      - AWS_ENDPOINT_URL=http://localstack:4566
       - MYSQL_HOST=mysql-test
       - POSTGRES_HOST=postgres-test
-      - NEWRELIC_API_ENDPOINT=http://mock-newrelic:8080
-      - NEWRELIC_LICENSE_KEY=test_license_key_123
-    volumes:
-      - .:/workspace
-      - /var/run/docker.sock:/var/run/docker.sock
+      - NEWRELIC_MOCK_URL=http://newrelic-mock:8081
+      - ANSIBLE_HOST_KEY_CHECKING=False
+    depends_on:
+      localstack:
+        condition: service_healthy
+      mysql-test:
+        condition: service_healthy
+      postgres-test:
+        condition: service_healthy
+      newrelic-mock:
+        condition: service_healthy
     networks:
-      - monitoring-network
-    command: sleep infinity
+      - monitoring
+    volumes:
+      - ".:/app:ro"
+      - "./test/results:/app/test/results:rw"
+    working_dir: /app
+    command: ["./test/run-tests.sh"]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    user: "${UID:-1000}:${GID:-1000}"
 
 networks:
-  monitoring-network:
+  monitoring:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
 
 volumes:
-  mysql-data:
-  postgres-data:
+  localstack_data:
+  mysql_data:
+  postgres_data:
+
+secrets:
+  mysql_root_password:
+    file: ./secrets/mysql_root_password.txt
+  mysql_password:
+    file: ./secrets/mysql_password.txt
+  postgres_password:
+    file: ./secrets/postgres_password.txt

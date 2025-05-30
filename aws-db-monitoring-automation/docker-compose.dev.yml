@@ -1,0 +1,82 @@
+version: '3.8'
+
+# Development/Testing Configuration
+# This file provides a simplified setup for local development and testing
+# without the security restrictions of the production configuration
+
+services:
+  # MySQL for development - simplified configuration
+  mysql-dev:
+    image: mysql:8.0
+    container_name: mysql-dev
+    environment:
+      MYSQL_ROOT_PASSWORD: devpassword
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: newrelic
+      MYSQL_PASSWORD: newrelic123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-dev-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pdevpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - dev-network
+
+  # PostgreSQL for development
+  postgres-dev:
+    image: postgres:15
+    container_name: postgres-dev
+    environment:
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_USER: postgres
+      POSTGRES_DB: testdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - dev-network
+
+  # LocalStack for AWS service mocking
+  localstack-dev:
+    image: localstack/localstack:latest
+    container_name: localstack-dev
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=ec2,iam,secretsmanager,ssm,s3,rds,cloudwatch,kms
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - "./localstack:/docker-entrypoint-initaws.d"
+      - localstack-dev-data:/var/lib/localstack
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - dev-network
+
+
+volumes:
+  mysql-dev-data:
+  postgres-dev-data:
+  localstack-dev-data:
+
+networks:
+  dev-network:
+    driver: bridge

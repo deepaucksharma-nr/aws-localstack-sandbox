@@ -49,13 +49,19 @@ class CredentialValidator:
     def test_mysql_connection(self, db: Dict[str, Any]) -> Tuple[bool, str]:
         """Test MySQL database connection"""
         try:
+            # SSL configuration
+            ssl_config = None
+            if db.get('ssl', False) or db.get('tls', False):
+                ssl_config = {'ssl': {'ssl_disabled': False}}
+            
             connection = pymysql.connect(
                 host=db['host'],
                 port=db.get('port', 3306),
                 user=db['user'],
                 password=db['password'],
                 database=db.get('database', 'information_schema'),
-                connect_timeout=10
+                connect_timeout=10,
+                ssl=ssl_config
             )
             
             with connection.cursor() as cursor:
@@ -86,11 +92,13 @@ class CredentialValidator:
             return True, f"Connected successfully (MySQL {version})"
             
         except pymysql.err.OperationalError as e:
-            return False, f"Connection failed: {str(e)}"
+            # Log connection error without exposing details
+            return False, "Connection failed: Unable to connect to MySQL database"
         except pymysql.err.ProgrammingError as e:
-            return False, f"Permission error: {str(e)}"
+            return False, "Permission error: Insufficient database privileges"
         except Exception as e:
-            return False, f"Unexpected error: {str(e)}"
+            # Log error without exposing sensitive information
+            return False, "Connection failed: Database connection error"
     
     def test_postgresql_connection(self, db: Dict[str, Any]) -> Tuple[bool, str]:
         """Test PostgreSQL database connection"""
@@ -102,7 +110,7 @@ class CredentialValidator:
                 password=db['password'],
                 database=db.get('database', 'postgres'),
                 connect_timeout=10,
-                sslmode=db.get('sslmode', 'prefer')
+                sslmode=db.get('sslmode', 'require')  # Default to require SSL
             )
             
             with connection.cursor() as cursor:
@@ -143,11 +151,13 @@ class CredentialValidator:
             return True, f"Connected successfully (PostgreSQL)"
             
         except psycopg2.OperationalError as e:
-            return False, f"Connection failed: {str(e)}"
+            # Log connection error without exposing details
+            return False, "Connection failed: Unable to connect to PostgreSQL database"
         except psycopg2.ProgrammingError as e:
-            return False, f"Permission error: {str(e)}"
+            return False, "Permission error: Insufficient database privileges"
         except Exception as e:
-            return False, f"Unexpected error: {str(e)}"
+            # Log error without exposing sensitive information
+            return False, "Connection failed: Database connection error"
     
     def validate_credentials(self) -> bool:
         """Validate all database credentials"""
@@ -178,8 +188,8 @@ class CredentialValidator:
                 
                 # Check for credential errors
                 if 'ERROR' in db.get('password', ''):
-                    print(f"✗ {db['password']}")
-                    self.errors.append(f"{name}: {db['password']}")
+                    print("✗ Failed to resolve credentials")
+                    self.errors.append(f"{name}: Credential resolution failed")
                     all_valid = False
                     continue
                 
@@ -202,8 +212,8 @@ class CredentialValidator:
                 
                 # Check for credential errors
                 if 'ERROR' in db.get('password', ''):
-                    print(f"✗ {db['password']}")
-                    self.errors.append(f"{name}: {db['password']}")
+                    print("✗ Failed to resolve credentials")
+                    self.errors.append(f"{name}: Credential resolution failed")
                     all_valid = False
                     continue
                 
@@ -227,15 +237,13 @@ class CredentialValidator:
         fixes.append("")
         
         for error in self.errors:
-            if "ERROR_FETCHING_SECRET" in error:
-                secret_name = error.split('ERROR_FETCHING_SECRET_')[1].split(':')[0]
-                fixes.append(f"# Fix missing secret: {secret_name}")
-                fixes.append(f"# aws secretsmanager create-secret --name {secret_name} --secret-string 'YOUR_PASSWORD'")
-                fixes.append("")
-            elif "ERROR_FETCHING_PARAMETER" in error:
-                param_name = error.split('ERROR_FETCHING_PARAMETER_')[1].split(':')[0]
-                fixes.append(f"# Fix missing parameter: {param_name}")
-                fixes.append(f"# aws ssm put-parameter --name {param_name} --value 'YOUR_PASSWORD' --type SecureString")
+            if "Credential resolution failed" in error:
+                db_name = error.split(':')[0]
+                fixes.append(f"# Fix credential resolution for: {db_name}")
+                fixes.append("# Check AWS credentials and ensure secrets/parameters exist")
+                fixes.append("# Example commands:")
+                fixes.append("# aws secretsmanager create-secret --name db-password --secret-string 'YOUR_PASSWORD'")
+                fixes.append("# aws ssm put-parameter --name /db/password --value 'YOUR_PASSWORD' --type SecureString")
                 fixes.append("")
             elif "Missing permissions" in error:
                 db_name = error.split(':')[0]
@@ -280,7 +288,7 @@ class CredentialValidator:
                 fix_file = "fix-credentials.sh"
                 with open(fix_file, 'w') as f:
                     f.write(fix_script)
-                os.chmod(fix_file, 0o755)
+                os.chmod(fix_file, 0o600)  # Secure permissions - owner read/write only
                 print(f"Fix script written to: {fix_file}")
         else:
             print("\n✓ All credentials validated successfully!")

@@ -1,0 +1,194 @@
+queries:
+  # Query Performance from pg_stat_statements
+  - name: postgresql_query_performance
+    query: |
+      SELECT 
+        queryid,
+        query as query_pattern,
+        calls as execution_count,
+        total_exec_time as total_time_ms,
+        mean_exec_time as avg_time_ms,
+        min_exec_time as min_time_ms,
+        max_exec_time as max_time_ms,
+        stddev_exec_time as stddev_time_ms,
+        rows as total_rows_returned,
+        shared_blks_hit + local_blks_hit as cache_hits,
+        shared_blks_read + local_blks_read as disk_reads,
+        shared_blks_dirtied + local_blks_dirtied as blocks_dirtied,
+        shared_blks_written + local_blks_written as blocks_written,
+        temp_blks_read,
+        temp_blks_written,
+        blk_read_time as disk_read_time_ms,
+        blk_write_time as disk_write_time_ms
+      FROM pg_stat_statements
+      WHERE query NOT LIKE '%pg_stat_statements%'
+      ORDER BY total_exec_time DESC
+      LIMIT 100
+    database: postgres
+    metric_name: query_performance
+    value_type: attribute
+    
+  # Table I/O Statistics
+  - name: postgresql_table_io_stats
+    query: |
+      SELECT 
+        schemaname as schema_name,
+        tablename as table_name,
+        n_tup_ins as rows_inserted,
+        n_tup_upd as rows_updated,
+        n_tup_del as rows_deleted,
+        n_tup_hot_upd as hot_updates,
+        n_live_tup as live_rows,
+        n_dead_tup as dead_rows,
+        seq_scan as sequential_scans,
+        seq_tup_read as sequential_rows_read,
+        idx_scan as index_scans,
+        idx_tup_fetch as index_rows_fetched,
+        n_mod_since_analyze as modifications_since_analyze,
+        last_vacuum,
+        last_autovacuum,
+        last_analyze,
+        last_autoanalyze,
+        vacuum_count,
+        autovacuum_count,
+        analyze_count,
+        autoanalyze_count
+      FROM pg_stat_user_tables
+      ORDER BY (n_tup_ins + n_tup_upd + n_tup_del) DESC
+      LIMIT 50
+    database: postgres
+    metric_name: table_io
+    value_type: attribute
+    
+  # Index Usage Statistics
+  - name: postgresql_index_usage
+    query: |
+      SELECT 
+        schemaname as schema_name,
+        tablename as table_name,
+        indexname as index_name,
+        idx_scan as index_scans,
+        idx_tup_read as index_rows_read,
+        idx_tup_fetch as index_rows_fetched,
+        pg_size_pretty(pg_relation_size(indexrelid)) as index_size
+      FROM pg_stat_user_indexes
+      ORDER BY idx_scan DESC
+      LIMIT 50
+    database: postgres
+    metric_name: index_usage
+    value_type: attribute
+    
+  # Connection Statistics
+  - name: postgresql_connection_stats
+    query: |
+      SELECT 
+        datname as database_name,
+        usename as user_name,
+        application_name,
+        client_addr as client_address,
+        state,
+        COUNT(*) as connection_count,
+        MAX(backend_start) as oldest_connection,
+        MIN(backend_start) as newest_connection,
+        MAX(EXTRACT(EPOCH FROM (now() - backend_start))) as max_connection_age_seconds
+      FROM pg_stat_activity
+      WHERE pid != pg_backend_pid()
+      GROUP BY datname, usename, application_name, client_addr, state
+    database: postgres
+    metric_name: connection_stats
+    value_type: attribute
+    
+  # Database Size Metrics
+  - name: postgresql_database_size
+    query: |
+      SELECT 
+        datname as database_name,
+        pg_database_size(datname) as size_bytes,
+        pg_size_pretty(pg_database_size(datname)) as size_pretty,
+        numbackends as active_connections,
+        xact_commit as transactions_committed,
+        xact_rollback as transactions_rolled_back,
+        blks_read as disk_blocks_read,
+        blks_hit as buffer_hits,
+        tup_returned as rows_returned,
+        tup_fetched as rows_fetched,
+        tup_inserted as rows_inserted,
+        tup_updated as rows_updated,
+        tup_deleted as rows_deleted,
+        conflicts,
+        temp_files as temp_files_created,
+        temp_bytes as temp_bytes_written,
+        deadlocks,
+        checksum_failures,
+        blk_read_time as block_read_time_ms,
+        blk_write_time as block_write_time_ms
+      FROM pg_stat_database
+      WHERE datname NOT IN ('template0', 'template1')
+    database: postgres
+    metric_name: database_size
+    value_type: attribute
+    
+  # Lock Statistics
+  - name: postgresql_lock_stats
+    query: |
+      SELECT 
+        database,
+        relation::regclass as table_name,
+        mode as lock_mode,
+        locktype as lock_type,
+        COUNT(*) as lock_count,
+        COUNT(*) FILTER (WHERE granted) as granted_locks,
+        COUNT(*) FILTER (WHERE NOT granted) as waiting_locks
+      FROM pg_locks
+      WHERE relation IS NOT NULL
+      GROUP BY database, relation, mode, locktype
+      ORDER BY lock_count DESC
+      LIMIT 20
+    database: postgres
+    metric_name: lock_stats
+    value_type: attribute
+    
+  # Table Bloat Estimation
+  - name: postgresql_table_bloat
+    query: |
+      WITH constants AS (
+        SELECT current_setting('block_size')::numeric AS bs, 23 AS hdr, 4 AS ma
+      ), bloat_info AS (
+        SELECT 
+          schemaname,
+          tablename,
+          cc.relpages,
+          bs,
+          CEIL((cc.reltuples*((datahdr+ma-
+            (CASE WHEN datahdr%ma=0 THEN ma ELSE datahdr%ma END))+nullhdr2+4))/(bs-20::float)) AS otta
+        FROM (
+          SELECT 
+            schemaname,
+            tablename,
+            hdr,
+            ma,
+            bs,
+            SUM((1-null_frac)*avg_width) AS nullhdr2,
+            hdr+(1+(count(*))/8) AS datahdr
+          FROM pg_stats s2
+          CROSS JOIN constants
+          GROUP BY 1,2,3,4,5
+        ) AS foo
+        JOIN pg_class cc ON cc.relname = foo.tablename
+        JOIN pg_namespace nn ON cc.relnamespace = nn.oid AND nn.nspname = foo.schemaname
+      )
+      SELECT
+        schemaname as schema_name,
+        tablename as table_name,
+        relpages::bigint as actual_pages,
+        otta::bigint as optimal_pages,
+        ROUND(CASE WHEN otta=0 OR relpages=0 THEN 0.0 ELSE relpages::float/otta END,1) as bloat_ratio,
+        CASE WHEN relpages < otta THEN 0 ELSE (bs*(relpages-otta))::bigint END as wasted_bytes,
+        pg_size_pretty(CASE WHEN relpages < otta THEN 0 ELSE (bs*(relpages-otta))::bigint END) as wasted_size
+      FROM bloat_info
+      WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+      ORDER BY wasted_bytes DESC
+      LIMIT 20
+    database: postgres
+    metric_name: table_bloat
+    value_type: attribute

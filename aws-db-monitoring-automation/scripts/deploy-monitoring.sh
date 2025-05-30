@@ -1,365 +1,344 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Enhanced deployment script with race condition fixes
 
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
 # Script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Default values
-TERRAFORM_DIR="${PROJECT_ROOT}/terraform"
-ANSIBLE_DIR="${PROJECT_ROOT}/ansible"
-CONFIG_FILE="${PROJECT_ROOT}/config/databases.yml"
-INVENTORY_FILE="${ANSIBLE_DIR}/inventory/hosts.yml"
-SSH_KEY_PATH=""
-SKIP_TERRAFORM=false
-SKIP_ANSIBLE=false
+# Source libraries
+source "$SCRIPT_DIR/lib/common.sh"
+source "$SCRIPT_DIR/lib/aws.sh"
+source "$SCRIPT_DIR/lib/validation.sh"
 
-# Function to print colored output
-print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
+# Configuration
+TERRAFORM_DIR="$PROJECT_ROOT/terraform"
+ANSIBLE_DIR="$PROJECT_ROOT/ansible"
+CONFIG_DIR="$PROJECT_ROOT/config"
+SSH_KEY_PATH="${SSH_KEY_PATH:-}"
+AUTO_APPROVE="${AUTO_APPROVE:-false}"
+DRY_RUN="${DRY_RUN:-false}"
+MAX_RETRIES="${MAX_RETRIES:-5}"
+RETRY_DELAY="${RETRY_DELAY:-10}"
 
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-# Function to display usage
-usage() {
+# Help message
+show_help() {
     cat << EOF
-Usage: $0 [OPTIONS]
+Usage: $(basename "$0") [OPTIONS]
 
-New Relic Database Monitoring AWS Deployment Script
+Deploy AWS database monitoring infrastructure with enhanced error handling.
 
-OPTIONS:
-    -k, --ssh-key PATH          Path to SSH private key for instance access
-    -c, --config PATH           Path to database configuration file (default: config/databases.yml)
-    -i, --inventory PATH        Path to Ansible inventory file (default: ansible/inventory/hosts.yml)
-    --skip-terraform            Skip Terraform deployment (use existing instance)
-    --skip-ansible              Skip Ansible configuration
-    -h, --help                  Display this help message
+Options:
+    -h, --help              Show this help message
+    -k, --key PATH          Path to SSH private key
+    -a, --auto-approve      Auto-approve Terraform changes
+    -d, --dry-run           Show what would be deployed without making changes
+    -r, --max-retries NUM   Maximum number of retries (default: 5)
+    -w, --retry-delay SEC   Delay between retries in seconds (default: 10)
+    -c, --config FILE       Path to configuration file (default: config/databases.yml)
 
-EXAMPLES:
-    # Full deployment
-    $0 -k ~/.ssh/my-key.pem
+Examples:
+    # Standard deployment
+    $(basename "$0") -k ~/.ssh/monitoring-key.pem
 
-    # Only run Ansible on existing instance
-    $0 -k ~/.ssh/my-key.pem --skip-terraform
+    # Dry run to see changes
+    $(basename "$0") -k ~/.ssh/monitoring-key.pem --dry-run
 
-    # Custom configuration file
-    $0 -k ~/.ssh/my-key.pem -c /path/to/custom-databases.yml
+    # Auto-approve with custom retries
+    $(basename "$0") -k ~/.ssh/monitoring-key.pem --auto-approve --max-retries 10
+
 EOF
 }
 
 # Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -k|--ssh-key)
-            SSH_KEY_PATH="$2"
-            shift 2
-            ;;
-        -c|--config)
-            CONFIG_FILE="$2"
-            shift 2
-            ;;
-        -i|--inventory)
-            INVENTORY_FILE="$2"
-            shift 2
-            ;;
-        --skip-terraform)
-            SKIP_TERRAFORM=true
-            shift
-            ;;
-        --skip-ansible)
-            SKIP_ANSIBLE=true
-            shift
-            ;;
-        -h|--help)
-            usage
-            exit 0
-            ;;
-        *)
-            print_error "Unknown option: $1"
-            usage
-            exit 1
-            ;;
-    esac
-done
-
-# Validate required parameters
-if [[ -z "$SSH_KEY_PATH" ]] && [[ "$SKIP_ANSIBLE" == "false" ]]; then
-    print_error "SSH key path is required unless using --skip-ansible"
-    usage
-    exit 1
-fi
-
-if [[ ! -f "$CONFIG_FILE" ]] && [[ "$SKIP_ANSIBLE" == "false" ]]; then
-    print_error "Database configuration file not found: $CONFIG_FILE"
-    exit 1
-fi
-
-# Function to run pre-flight checks
-run_preflight_checks() {
-    print_status "Running pre-flight checks..."
-    
-    local checks_passed=true
-    
-    # Check Terraform
-    if command -v terraform &>/dev/null; then
-        print_success "Terraform is installed"
-    else
-        print_error "Terraform is not installed"
-        checks_passed=false
-    fi
-    
-    # Check Ansible
-    if command -v ansible-playbook &>/dev/null; then
-        print_success "Ansible is installed"
-    else
-        print_error "Ansible is not installed"
-        checks_passed=false
-    fi
-    
-    # Check AWS CLI
-    if command -v aws &>/dev/null; then
-        print_success "AWS CLI is installed"
-        
-        # Check AWS credentials
-        if aws sts get-caller-identity &>/dev/null; then
-            print_success "AWS credentials are configured"
-        else
-            print_error "AWS credentials are not configured"
-            print_error "Run: aws configure"
-            checks_passed=false
-        fi
-    else
-        print_error "AWS CLI is not installed"
-        checks_passed=false
-    fi
-    
-    # Check SSH key
-    if [[ "$SKIP_ANSIBLE" == "false" ]] && [[ -n "$SSH_KEY_PATH" ]]; then
-        if [[ -f "$SSH_KEY_PATH" ]]; then
-            print_success "SSH key exists: $SSH_KEY_PATH"
-            
-            # Check permissions
-            local perms=$(stat -c "%a" "$SSH_KEY_PATH" 2>/dev/null || stat -f "%A" "$SSH_KEY_PATH" 2>/dev/null)
-            if [[ "$perms" == "600" ]] || [[ "$perms" == "400" ]]; then
-                print_success "SSH key has correct permissions"
-            else
-                print_warning "SSH key permissions should be 600 or 400"
-                print_status "Fixing permissions..."
-                chmod 600 "$SSH_KEY_PATH"
-            fi
-        else
-            print_error "SSH key not found: $SSH_KEY_PATH"
-            checks_passed=false
-        fi
-    fi
-    
-    # Check configuration files
-    if [[ "$SKIP_TERRAFORM" == "false" ]]; then
-        if [[ -f "$TERRAFORM_DIR/terraform.tfvars" ]]; then
-            print_success "terraform.tfvars exists"
-            
-            # Check for placeholder values
-            if grep -q "YOUR_" "$TERRAFORM_DIR/terraform.tfvars"; then
-                print_error "terraform.tfvars contains placeholder values"
-                print_error "Please update all YOUR_* values in terraform.tfvars"
-                checks_passed=false
-            fi
-        else
-            print_error "terraform.tfvars not found"
-            print_error "Copy terraform.tfvars.example to terraform.tfvars and update values"
-            checks_passed=false
-        fi
-    fi
-    
-    if [[ "$SKIP_ANSIBLE" == "false" ]]; then
-        if grep -q "YOUR_NEWRELIC_LICENSE_KEY" "$CONFIG_FILE" 2>/dev/null; then
-            print_error "Database configuration contains placeholder license key"
-            print_error "Please update newrelic_license_key in $CONFIG_FILE"
-            checks_passed=false
-        fi
-    fi
-    
-    if [[ "$checks_passed" == "false" ]]; then
-        print_error "Pre-flight checks failed. Please fix the issues above and try again."
-        exit 1
-    fi
-    
-    print_success "All pre-flight checks passed!"
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -k|--key)
+                SSH_KEY_PATH="$2"
+                shift 2
+                ;;
+            -a|--auto-approve)
+                AUTO_APPROVE=true
+                shift
+                ;;
+            -d|--dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            -r|--max-retries)
+                MAX_RETRIES="$2"
+                shift 2
+                ;;
+            -w|--retry-delay)
+                RETRY_DELAY="$2"
+                shift 2
+                ;;
+            -c|--config)
+                CONFIG_FILE="$2"
+                shift 2
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
 }
 
-# Function to run Terraform
-run_terraform() {
-    print_status "Starting Terraform deployment..."
+# Enhanced retry logic with exponential backoff
+retry_with_backoff() {
+    local cmd="$1"
+    local description="${2:-command}"
+    local retries=0
+    local delay=$RETRY_DELAY
     
-    cd "$TERRAFORM_DIR"
+    while [ $retries -lt $MAX_RETRIES ]; do
+        print_status "Attempting $description (attempt $((retries+1))/$MAX_RETRIES)..."
+        
+        if eval "$cmd"; then
+            print_success "$description succeeded"
+            return 0
+        fi
+        
+        retries=$((retries + 1))
+        if [ $retries -lt $MAX_RETRIES ]; then
+            print_warning "$description failed, retrying in ${delay}s..."
+            sleep $delay
+            # Exponential backoff with jitter
+            delay=$((delay * 2 + RANDOM % 10))
+        fi
+    done
     
-    # Check if terraform.tfvars exists
-    if [[ ! -f "terraform.tfvars" ]]; then
-        print_error "terraform.tfvars not found. Please copy terraform.tfvars.example and update with your values."
-        exit 1
+    print_error "$description failed after $MAX_RETRIES attempts"
+    return 1
+}
+
+# Validate prerequisites with timeout
+validate_prerequisites() {
+    print_status "Validating prerequisites..."
+    
+    # Set timeout for validation operations
+    local timeout_cmd="timeout 30"
+    
+    # Check AWS credentials with timeout
+    if ! $timeout_cmd aws sts get-caller-identity &>/dev/null; then
+        print_error "AWS credentials check failed or timed out"
+        return 1
+    fi
+    print_success "AWS credentials validated"
+    
+    # Check required tools
+    local required_tools=("terraform" "ansible-playbook" "jq" "nc")
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" &>/dev/null; then
+            print_error "Required tool not found: $tool"
+            return 1
+        fi
+    done
+    print_success "All required tools found"
+    
+    # Validate SSH key if provided
+    if [ -n "$SSH_KEY_PATH" ]; then
+        if [ ! -f "$SSH_KEY_PATH" ]; then
+            print_error "SSH key not found: $SSH_KEY_PATH"
+            return 1
+        fi
+        
+        # Fix permissions if needed
+        local perms=$(stat -c "%a" "$SSH_KEY_PATH" 2>/dev/null || stat -f "%Lp" "$SSH_KEY_PATH" 2>/dev/null)
+        if [ "$perms" != "600" ]; then
+            print_warning "Fixing SSH key permissions..."
+            chmod 600 "$SSH_KEY_PATH"
+        fi
+        print_success "SSH key validated"
     fi
     
-    # Initialize Terraform
+    return 0
+}
+
+# Run Terraform with proper error handling
+run_terraform() {
+    cd "$TERRAFORM_DIR"
+    
     print_status "Initializing Terraform..."
-    terraform init
+    if ! terraform init; then
+        print_error "Terraform initialization failed"
+        return 1
+    fi
     
-    # Plan deployment
-    print_status "Planning Terraform deployment..."
-    terraform plan -out=tfplan
+    # Validate configuration
+    print_status "Validating Terraform configuration..."
+    if ! terraform validate; then
+        print_error "Terraform validation failed"
+        return 1
+    fi
     
-    # Apply deployment
-    print_status "Applying Terraform configuration..."
-    terraform apply tfplan
+    if [ "$DRY_RUN" = true ]; then
+        print_status "Running Terraform plan (dry run)..."
+        terraform plan -var-file=terraform.tfvars
+    else
+        print_status "Applying Terraform configuration..."
+        if [ "$AUTO_APPROVE" = true ]; then
+            terraform apply -var-file=terraform.tfvars -auto-approve
+        else
+            terraform apply -var-file=terraform.tfvars
+        fi
+        
+        # Wait for outputs to be available
+        sleep 2
+        
+        # Capture outputs with retry
+        retry_with_backoff \
+            "terraform output -json > '$PROJECT_ROOT/terraform-outputs.json'" \
+            "capturing Terraform outputs"
+    fi
     
-    # Get outputs
-    INSTANCE_IP=$(terraform output -raw instance_public_ip)
-    INSTANCE_ID=$(terraform output -raw instance_id)
+    cd - >/dev/null
+}
+
+# Enhanced instance readiness check
+wait_for_instance_ready() {
+    local instance_ip="$1"
+    local ssh_key="$2"
     
-    print_success "EC2 instance created successfully!"
-    print_status "Instance ID: $INSTANCE_ID"
-    print_status "Instance IP: $INSTANCE_IP"
+    print_status "Waiting for instance to be fully ready..."
     
-    # Generate Ansible inventory
-    print_status "Generating Ansible inventory..."
-    cat > "$INVENTORY_FILE" << EOF
+    # First, check if instance responds to ping
+    retry_with_backoff \
+        "ping -c 1 -W 2 $instance_ip >/dev/null 2>&1" \
+        "ping check to $instance_ip"
+    
+    # Then check SSH port
+    retry_with_backoff \
+        "nc -zv -w5 $instance_ip 22 2>&1 | grep -q succeeded" \
+        "SSH port check on $instance_ip"
+    
+    # Finally, check actual SSH connectivity
+    local ssh_opts="-o StrictHostKeyChecking=no -o ConnectTimeout=10"
+    if [ -n "$ssh_key" ]; then
+        ssh_opts="$ssh_opts -i $ssh_key"
+    fi
+    
+    retry_with_backoff \
+        "ssh $ssh_opts ec2-user@$instance_ip 'echo Connection test'" \
+        "SSH connection to $instance_ip"
+    
+    # Give instance a moment to fully initialize
+    sleep 5
+    
+    return 0
+}
+
+# Run Ansible with enhanced error handling
+run_ansible() {
+    print_status "Preparing Ansible deployment..."
+    
+    # Check for Terraform outputs
+    if [ ! -f "$PROJECT_ROOT/terraform-outputs.json" ]; then
+        print_error "Terraform outputs not found"
+        return 1
+    fi
+    
+    # Extract instance information with validation
+    local instance_ip=$(jq -r '.monitoring_instance_public_ip.value // empty' "$PROJECT_ROOT/terraform-outputs.json")
+    local instance_id=$(jq -r '.monitoring_instance_id.value // empty' "$PROJECT_ROOT/terraform-outputs.json")
+    
+    if [ -z "$instance_ip" ] || [ -z "$instance_id" ]; then
+        print_error "Failed to extract instance information from Terraform outputs"
+        return 1
+    fi
+    
+    print_status "Monitoring instance: $instance_id ($instance_ip)"
+    
+    # Wait for instance with enhanced checks
+    wait_for_instance_ready "$instance_ip" "$SSH_KEY_PATH"
+    
+    # Create temporary inventory
+    local inventory_file="$PROJECT_ROOT/ansible/inventory/hosts.yml"
+    print_status "Creating Ansible inventory..."
+    cat > "$inventory_file" <<EOF
 all:
   hosts:
-    monitoring_server:
-      ansible_host: $INSTANCE_IP
+    monitoring-server:
+      ansible_host: $instance_ip
       ansible_user: ec2-user
       ansible_ssh_private_key_file: $SSH_KEY_PATH
       ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
 EOF
     
-    cd "$PROJECT_ROOT"
-}
-
-# Function to wait for instance to be ready
-wait_for_instance() {
-    print_status "Waiting for instance to be ready..."
-    
-    local max_attempts=30
-    local attempt=0
-    
-    while [[ $attempt -lt $max_attempts ]]; do
-        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-            -i "$SSH_KEY_PATH" ec2-user@"$INSTANCE_IP" "echo 'Instance ready'" &>/dev/null; then
-            print_success "Instance is ready for configuration!"
-            return 0
-        fi
-        
-        attempt=$((attempt + 1))
-        print_status "Waiting for SSH access... (attempt $attempt/$max_attempts)"
-        sleep 10
-    done
-    
-    print_error "Timeout waiting for instance to be ready"
-    return 1
-}
-
-# Function to run Ansible
-run_ansible() {
-    print_status "Starting Ansible configuration..."
-    
+    # Run Ansible playbook with retry
     cd "$ANSIBLE_DIR"
+    print_status "Running Ansible playbook..."
     
-    # Check if inventory exists
-    if [[ ! -f "$INVENTORY_FILE" ]]; then
-        print_error "Ansible inventory file not found: $INVENTORY_FILE"
-        print_error "If using --skip-terraform, please create the inventory file manually"
-        exit 1
+    local ansible_cmd="ansible-playbook -i inventory/hosts.yml playbooks/install-newrelic.yml"
+    
+    if retry_with_backoff "$ansible_cmd" "Ansible playbook execution"; then
+        print_success "Ansible deployment completed successfully"
+    else
+        print_error "Ansible deployment failed"
+        return 1
     fi
     
-    # Get instance IP from inventory if not set
-    if [[ -z "${INSTANCE_IP:-}" ]]; then
-        INSTANCE_IP=$(grep ansible_host "$INVENTORY_FILE" | awk '{print $2}')
-    fi
-    
-    # Wait for instance
-    wait_for_instance
-    
-    # Run Ansible playbook
-    print_status "Running Ansible playbook to install New Relic Infrastructure agent..."
-    ansible-playbook \
-        -i "$INVENTORY_FILE" \
-        playbooks/install-newrelic.yml \
-        -e "@$CONFIG_FILE"
-    
-    print_success "New Relic Infrastructure agent installed and configured!"
-    
-    # Display verification commands
-    print_status "To verify the installation, SSH to the instance and run:"
-    print_status "  sudo systemctl status newrelic-infra"
-    print_status "  sudo cat /etc/newrelic-infra/integrations.d/mysql-config.yml"
-    print_status "  sudo cat /etc/newrelic-infra/integrations.d/postgresql-config.yml"
-    
-    cd "$PROJECT_ROOT"
+    cd - >/dev/null
 }
 
-# Function to display next steps
-display_next_steps() {
+# Main deployment function
+deploy() {
+    print_status "Starting deployment process..."
+    
+    # Validate prerequisites
+    if ! validate_prerequisites; then
+        print_error "Prerequisites validation failed"
+        return 1
+    fi
+    
+    # Run Terraform
+    if ! run_terraform; then
+        print_error "Terraform deployment failed"
+        return 1
+    fi
+    
+    if [ "$DRY_RUN" = true ]; then
+        print_success "Dry run completed successfully"
+        return 0
+    fi
+    
+    # Run Ansible
+    if ! run_ansible; then
+        print_error "Ansible configuration failed"
+        return 1
+    fi
+    
     print_success "Deployment completed successfully!"
     
-    if [[ "$SKIP_TERRAFORM" == "false" ]] && [[ "$SKIP_ANSIBLE" == "false" ]]; then
-        print_status ""
-        print_status "Next steps:"
-        print_status "1. SSH to the monitoring server:"
-        print_status "   ssh -i $SSH_KEY_PATH ec2-user@$INSTANCE_IP"
-        print_status ""
-        print_status "2. Check New Relic Infrastructure agent status:"
-        print_status "   sudo systemctl status newrelic-infra"
-        print_status ""
-        print_status "3. View your infrastructure in New Relic One:"
-        print_status "   https://one.newrelic.com/infrastructure"
-        print_status ""
-        print_status "4. View database monitoring:"
-        print_status "   https://one.newrelic.com/infrastructure/databases"
-    fi
+    # Display connection information
+    local instance_ip=$(jq -r '.monitoring_instance_public_ip.value' "$PROJECT_ROOT/terraform-outputs.json")
+    print_status "Monitoring server available at: $instance_ip"
+    print_status "SSH: ssh -i $SSH_KEY_PATH ec2-user@$instance_ip"
 }
+
+# Cleanup on error
+cleanup_on_error() {
+    print_error "Deployment failed. Cleaning up..."
+    # Add cleanup logic here if needed
+    exit 1
+}
+
+# Set up error handling
+trap cleanup_on_error ERR
 
 # Main execution
 main() {
-    print_status "Starting New Relic Database Monitoring Deployment"
-    print_status "Configuration file: $CONFIG_FILE"
-    
-    # Run pre-flight checks
-    run_preflight_checks
-    
-    # Run Terraform unless skipped
-    if [[ "$SKIP_TERRAFORM" == "false" ]]; then
-        run_terraform
-    else
-        print_warning "Skipping Terraform deployment"
-    fi
-    
-    # Run Ansible unless skipped
-    if [[ "$SKIP_ANSIBLE" == "false" ]]; then
-        run_ansible
-    else
-        print_warning "Skipping Ansible configuration"
-    fi
-    
-    display_next_steps
+    parse_args "$@"
+    deploy
 }
 
 # Run main function
-main
+main "$@"

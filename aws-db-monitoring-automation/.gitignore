@@ -55,6 +55,9 @@ coverage/
 # Docker
 .env
 docker-compose.override.yml
+secrets/
+*.secret
+*_password.txt
 
 # SSH Keys
 *.pem

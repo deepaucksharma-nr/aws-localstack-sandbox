@@ -1,16 +1,45 @@
-FROM node:18-alpine
+# Use specific version of Node.js Alpine
+FROM node:18.19.0-alpine3.19
 
+# Install security updates
+RUN apk update && apk upgrade && rm -rf /var/cache/apk/*
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 -G nodejs
+
+# Set working directory
 WORKDIR /app
 
-# Install dependencies
-COPY package*.json ./
-RUN npm ci --only=production
+# Copy package files
+COPY --chown=nodejs:nodejs package*.json ./
+
+# Install production dependencies only
+RUN npm ci --only=production && \
+    npm cache clean --force && \
+    npm audit fix
 
 # Copy application files
-COPY . .
+COPY --chown=nodejs:nodejs . .
 
-# Expose ports
-EXPOSE 8080 8081
+# Remove unnecessary files
+RUN rm -rf .git .gitignore Dockerfile* .dockerignore
 
-# Start the mock server
+# Set security headers
+ENV NODE_ENV=production
+
+# Create directories for runtime
+RUN mkdir -p /app/logs && chown nodejs:nodejs /app/logs
+
+# Switch to non-root user
+USER nodejs
+
+# Expose port
+EXPOSE 8081
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node healthcheck.js || exit 1
+
+# Run application
 CMD ["node", "server.js"]
