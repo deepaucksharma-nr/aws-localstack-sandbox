@@ -147,29 +147,7 @@ Components:
     └── Replication status
 ```
 
-### 4. Data Flow Architecture
 
-```mermaid
-sequenceDiagram
-    participant DB as Database
-    participant Agent as NR Agent
-    participant Integration as DB Integration
-    participant API as NR API
-    participant Platform as NR Platform
-
-    Integration->>DB: Execute monitoring queries
-    DB-->>Integration: Return metrics
-    Integration->>Agent: Send structured data
-    Agent->>API: HTTPS POST (compressed)
-    API-->>Platform: Process and store
-    Platform-->>Platform: Generate insights
-```
-
-**Data Collection Intervals:**
-- Infrastructure Metrics: 15 seconds
-- Database Metrics: 30-60 seconds
-- Query Performance: 60 seconds
-- Custom Metrics: Configurable
 
 ### 5. Security Architecture
 
