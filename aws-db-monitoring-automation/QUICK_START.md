@@ -1,137 +1,176 @@
 # Quick Start Guide
 
-Get up and running with New Relic database monitoring in under 10 minutes!
+Get New Relic database monitoring deployed in under 10 minutes! This guide walks you through the fastest path to monitoring your MySQL and PostgreSQL databases.
 
 ## Prerequisites Checklist
 
-- [ ] AWS Account with appropriate permissions
+Before starting, ensure you have:
+
+- [ ] AWS Account with appropriate IAM permissions
 - [ ] New Relic account with Infrastructure Pro license
-- [ ] Existing VPC and subnet IDs
-- [ ] SSH key pair created in AWS
-- [ ] Database credentials (read-only user)
+- [ ] AWS CLI installed and configured
+- [ ] Terraform >= 1.0 installed
+- [ ] Ansible >= 2.9 installed
+- [ ] An existing VPC and subnet in AWS
+- [ ] SSH key pair created in your AWS region
 
-## 5-Minute Setup
-
-### 1. Clone the Repository
+## Step 1: Clone and Setup (2 minutes)
 
 ```bash
+# Clone the repository
 git clone https://github.com/newrelic/aws-db-monitoring-automation.git
 cd aws-db-monitoring-automation
+
+# Run setup verification
+./scripts/setup-verification.sh --step-by-step
 ```
 
-### 2. Configure Your Environment
+## Step 2: Configure AWS Resources (3 minutes)
 
 ```bash
-# Copy example configurations
+# Copy and edit Terraform configuration
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-cp config/databases.example.yml config/databases.yml
-
-# Edit with your values
-nano terraform/terraform.tfvars
 ```
 
-**Required values in terraform.tfvars:**
+Edit `terraform/terraform.tfvars`:
 ```hcl
-aws_region              = "us-east-1"
-vpc_id                 = "vpc-xxxxx"      # Your VPC ID
-subnet_id              = "subnet-xxxxx"   # Your private subnet ID
-key_name               = "my-ssh-key"     # Your AWS SSH key name
-newrelic_license_key   = "xxxxx"         # Your New Relic license key
-newrelic_account_id    = "xxxxx"         # Your New Relic account ID
+aws_region              = "us-east-1"              # Your AWS region
+instance_type           = "t3.medium"              # Monitoring instance size
+key_name               = "my-aws-key"              # Your AWS SSH key name
+vpc_id                 = "vpc-12345678"            # Your VPC ID
+subnet_id              = "subnet-12345678"         # Your subnet ID
+monitoring_server_name = "nr-db-monitor"           # Instance name
+allowed_ssh_cidr_blocks = ["10.0.0.0/8"]          # Your IP range for SSH
+newrelic_license_key   = "YOUR_LICENSE_KEY_HERE"  # Your New Relic license
+newrelic_account_id    = "1234567"                # Your New Relic account ID
+newrelic_region        = "US"                      # US or EU
 ```
 
-### 3. Configure Your Databases
+## Step 3: Configure Databases (2 minutes)
 
-Edit `config/databases.yml`:
+```bash
+# Copy and edit database configuration
+cp config/databases.example.yml config/databases.yml
+```
 
+Edit `config/databases.yml` with your database details:
 ```yaml
 newrelic_license_key: "YOUR_LICENSE_KEY_HERE"
-newrelic_account_id: "YOUR_ACCOUNT_ID_HERE"
+newrelic_account_id: "1234567"
 
 mysql_databases:
   - host: mysql.example.com
     port: 3306
     user: newrelic
-    password: "your_password"
-    service_name: production-mysql
+    password: "secure_password"
+    enable_query_monitoring: true    # Enable query performance insights
 
 postgresql_databases:
   - host: postgres.example.com
     port: 5432
     user: newrelic
-    password: "your_password"
+    password: "secure_password"
     database: postgres
-    service_name: production-postgres
+    enable_query_monitoring: true    # Enable pg_stat_statements monitoring
 ```
 
-### 4. Deploy!
+## Step 4: Prepare Your Databases (3 minutes)
+
+### For MySQL:
+```sql
+-- Run on your MySQL server
+CREATE USER 'newrelic'@'%' IDENTIFIED BY 'secure_password';
+GRANT SELECT, PROCESS, REPLICATION CLIENT ON *.* TO 'newrelic'@'%';
+GRANT SELECT ON performance_schema.* TO 'newrelic'@'%';
+```
+
+Or use our script:
+```bash
+mysql -u root -p < scripts/setup-mysql-monitoring.sql
+```
+
+### For PostgreSQL:
+```sql
+-- Run on your PostgreSQL server
+CREATE USER newrelic WITH PASSWORD 'secure_password';
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+GRANT pg_read_all_stats TO newrelic;
+```
+
+Or use our script:
+```bash
+psql -U postgres -f scripts/setup-postgresql-monitoring.sql
+```
+
+## Step 5: Test Database Connections (Optional)
 
 ```bash
-./scripts/deploy-monitoring.sh -k ~/.ssh/your-key.pem
+# Test connections before deployment
+./scripts/test-db-connection.sh \
+  --mysql-host mysql.example.com \
+  --mysql-pass your_password \
+  --pg-host postgres.example.com \
+  --pg-pass your_password
 ```
 
-### 5. Verify in New Relic
-
-1. Go to [New Relic One](https://one.newrelic.com)
-2. Navigate to Infrastructure → Databases
-3. You should see your databases within 2-3 minutes
-
-## Quick Test with LocalStack
-
-Want to test without AWS resources? Use our LocalStack setup:
+## Step 6: Deploy! (2 minutes)
 
 ```bash
-# Start test environment
-make start
+# Run the deployment
+./scripts/deploy-monitoring.sh -k ~/.ssh/my-aws-key.pem
 
-# Run deployment against LocalStack
-make deploy-local
-
-# Run tests
-make test
-
-# Clean up
-make stop
+# The script will:
+# 1. Run pre-flight checks
+# 2. Create AWS infrastructure with Terraform
+# 3. Install New Relic agent with Ansible
+# 4. Configure database monitoring
 ```
+
+## Step 7: Verify in New Relic
+
+After deployment completes:
+
+1. **Infrastructure**: https://one.newrelic.com/infrastructure
+   - You should see your monitoring instance within 1-2 minutes
+
+2. **Databases**: https://one.newrelic.com/infrastructure/databases
+   - Database entities appear within 3-5 minutes
+
+3. **Query Performance**: Click on any database to see query insights
+   - Query data populates after 5-10 minutes of activity
 
 ## Common Quick Fixes
 
+### "terraform.tfvars contains placeholder values"
+```bash
+# Ensure all YOUR_* placeholders are replaced with actual values
+grep "YOUR_" terraform/terraform.tfvars
+```
+
 ### "Cannot connect to database"
 ```bash
-# Test from monitoring instance
-ssh -i ~/.ssh/your-key.pem ec2-user@<instance-ip>
-mysql -h your-database.com -u newrelic -p
+# Check security groups allow monitoring instance access
+# MySQL: port 3306, PostgreSQL: port 5432
+aws ec2 describe-security-groups --group-ids sg-xxxxx
 ```
 
-### "No data in New Relic"
+### "No query data showing"
 ```bash
-# Check agent status on monitoring instance
-sudo systemctl status newrelic-infra
-sudo journalctl -u newrelic-infra -n 50
+# Validate query monitoring setup
+./scripts/validate-query-monitoring.sh \
+  --mysql-host your-host --mysql-pass your-pass
 ```
 
-### "Permission denied"
-```sql
--- MySQL: Grant required permissions
-GRANT SELECT, PROCESS, REPLICATION CLIENT ON *.* TO 'newrelic'@'%';
+## What's Next?
 
--- PostgreSQL: Grant monitor role
-GRANT pg_monitor TO newrelic;
-```
-
-## Next Steps
-
-- 📖 Read the [Architecture Overview](docs/ARCHITECTURE.md)
-- 🔒 Review [Security Best Practices](docs/BEST_PRACTICES.md#security-best-practices)
-- 📊 Set up [Custom Dashboards](docs/DASHBOARDS.md)
-- 🚨 Configure [Alerts](docs/ALERTING.md)
+- **Custom Dashboards**: Import our dashboard templates
+- **Alerts**: Set up proactive alerting
+- **Advanced Config**: See [Configuration Guide](docs/CONFIGURATION.md)
+- **Troubleshooting**: See [Troubleshooting Guide](docs/TROUBLESHOOTING.md)
 
 ## Need Help?
 
-- 💬 [Community Forum](https://discuss.newrelic.com)
-- 📚 [Documentation](https://docs.newrelic.com)
-- 🎫 [Support](https://support.newrelic.com)
-
----
-
-**Pro Tip**: Start with one database in development, validate everything works, then scale to production!
+- Run setup verification: `./scripts/setup-verification.sh --verbose`
+- Check logs: `sudo journalctl -u newrelic-infra -f`
+- Community: https://discuss.newrelic.com
+- Support: https://support.newrelic.com
