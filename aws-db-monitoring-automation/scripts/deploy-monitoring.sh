@@ -113,6 +113,99 @@ if [[ ! -f "$CONFIG_FILE" ]] && [[ "$SKIP_ANSIBLE" == "false" ]]; then
     exit 1
 fi
 
+# Function to run pre-flight checks
+run_preflight_checks() {
+    print_status "Running pre-flight checks..."
+    
+    local checks_passed=true
+    
+    # Check Terraform
+    if command -v terraform &>/dev/null; then
+        print_success "Terraform is installed"
+    else
+        print_error "Terraform is not installed"
+        checks_passed=false
+    fi
+    
+    # Check Ansible
+    if command -v ansible-playbook &>/dev/null; then
+        print_success "Ansible is installed"
+    else
+        print_error "Ansible is not installed"
+        checks_passed=false
+    fi
+    
+    # Check AWS CLI
+    if command -v aws &>/dev/null; then
+        print_success "AWS CLI is installed"
+        
+        # Check AWS credentials
+        if aws sts get-caller-identity &>/dev/null; then
+            print_success "AWS credentials are configured"
+        else
+            print_error "AWS credentials are not configured"
+            print_error "Run: aws configure"
+            checks_passed=false
+        fi
+    else
+        print_error "AWS CLI is not installed"
+        checks_passed=false
+    fi
+    
+    # Check SSH key
+    if [[ "$SKIP_ANSIBLE" == "false" ]] && [[ -n "$SSH_KEY_PATH" ]]; then
+        if [[ -f "$SSH_KEY_PATH" ]]; then
+            print_success "SSH key exists: $SSH_KEY_PATH"
+            
+            # Check permissions
+            local perms=$(stat -c "%a" "$SSH_KEY_PATH" 2>/dev/null || stat -f "%A" "$SSH_KEY_PATH" 2>/dev/null)
+            if [[ "$perms" == "600" ]] || [[ "$perms" == "400" ]]; then
+                print_success "SSH key has correct permissions"
+            else
+                print_warning "SSH key permissions should be 600 or 400"
+                print_status "Fixing permissions..."
+                chmod 600 "$SSH_KEY_PATH"
+            fi
+        else
+            print_error "SSH key not found: $SSH_KEY_PATH"
+            checks_passed=false
+        fi
+    fi
+    
+    # Check configuration files
+    if [[ "$SKIP_TERRAFORM" == "false" ]]; then
+        if [[ -f "$TERRAFORM_DIR/terraform.tfvars" ]]; then
+            print_success "terraform.tfvars exists"
+            
+            # Check for placeholder values
+            if grep -q "YOUR_" "$TERRAFORM_DIR/terraform.tfvars"; then
+                print_error "terraform.tfvars contains placeholder values"
+                print_error "Please update all YOUR_* values in terraform.tfvars"
+                checks_passed=false
+            fi
+        else
+            print_error "terraform.tfvars not found"
+            print_error "Copy terraform.tfvars.example to terraform.tfvars and update values"
+            checks_passed=false
+        fi
+    fi
+    
+    if [[ "$SKIP_ANSIBLE" == "false" ]]; then
+        if grep -q "YOUR_NEWRELIC_LICENSE_KEY" "$CONFIG_FILE" 2>/dev/null; then
+            print_error "Database configuration contains placeholder license key"
+            print_error "Please update newrelic_license_key in $CONFIG_FILE"
+            checks_passed=false
+        fi
+    fi
+    
+    if [[ "$checks_passed" == "false" ]]; then
+        print_error "Pre-flight checks failed. Please fix the issues above and try again."
+        exit 1
+    fi
+    
+    print_success "All pre-flight checks passed!"
+}
+
 # Function to run Terraform
 run_terraform() {
     print_status "Starting Terraform deployment..."
@@ -247,6 +340,9 @@ display_next_steps() {
 main() {
     print_status "Starting New Relic Database Monitoring Deployment"
     print_status "Configuration file: $CONFIG_FILE"
+    
+    # Run pre-flight checks
+    run_preflight_checks
     
     # Run Terraform unless skipped
     if [[ "$SKIP_TERRAFORM" == "false" ]]; then

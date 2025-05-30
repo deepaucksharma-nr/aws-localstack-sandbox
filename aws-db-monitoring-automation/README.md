@@ -1,330 +1,194 @@
-# AWS New Relic Database Monitoring Automation
+# New Relic Database Monitoring Reference Architecture
 
-This automation setup creates AWS EC2 instances, installs New Relic Infrastructure agent, and configures database monitoring (On Host Integration - OHI) for MySQL and PostgreSQL databases.
+<div align="center">
+  <img src="https://newrelic.com/assets/newrelic/source/NewRelic-logo-square.png" alt="New Relic" width="100">
+  
+  [![New Relic Experimental](https://img.shields.io/badge/New%20Relic-Experimental-blue)](https://opensource.newrelic.com/oss-category/#new-relic-experimental)
+  [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+  [![Terraform](https://img.shields.io/badge/Terraform->=1.0-623ce4)](https://www.terraform.io)
+  [![Ansible](https://img.shields.io/badge/Ansible->=2.9-ee0000)](https://www.ansible.com)
+  
+  **Production-ready automation for deploying New Relic database monitoring at scale**
+  
+  [Quick Start](QUICK_START.md) • [Documentation](docs/) • [Contributing](CONTRIBUTING.md) • [Support](#support)
+</div>
 
-## Prerequisites
+## 🚀 Overview
 
-- AWS CLI configured with appropriate credentials
-- Terraform >= 1.0
-- Ansible >= 2.9
-- An existing VPC and subnet in AWS
-- SSH key pair created in AWS
-- New Relic account with:
-  - Valid license key
-  - Account ID
+This reference architecture provides a complete, automated solution for deploying New Relic Infrastructure monitoring with database integrations (MySQL and PostgreSQL) on AWS. Developed and maintained by the New Relic team, it demonstrates best practices for infrastructure automation, security, and observability.
 
-## Directory Structure
+### ✨ Key Features
 
-```
-aws-db-monitoring-automation/
-├── terraform/                 # Terraform configuration for AWS resources
-│   ├── main.tf               # Main Terraform configuration
-│   ├── variables.tf          # Variable definitions
-│   ├── outputs.tf            # Output definitions
-│   └── terraform.tfvars.example
-├── ansible/                   # Ansible automation
-│   ├── playbooks/            # Ansible playbooks
-│   │   └── install-newrelic.yml
-│   ├── templates/            # Configuration templates
-│   │   ├── newrelic-infra.yml.j2
-│   │   ├── mysql-config.yml.j2
-│   │   └── postgresql-config.yml.j2
-│   └── inventory/            # Ansible inventory files
-│       └── hosts.yml.example
-├── scripts/                   # Automation scripts
-│   └── deploy-monitoring.sh  # Main deployment script
-└── config/                    # Configuration files
-    └── databases.example.yml # Example database configuration
-```
+- **🔧 Infrastructure as Code**: Fully automated deployment using Terraform and Ansible
+- **📊 Query Performance Monitoring**: Deep insights into slow queries, wait events, and database performance
+- **🔒 Security First**: Encrypted connections, least-privilege access, credential vaulting support
+- **🧪 Comprehensive Testing**: LocalStack integration for cost-free testing and validation
+- **📈 Production Ready**: Battle-tested patterns for monitoring hundreds of databases
+- **🎯 Multi-Database Support**: MySQL 5.7/8.0+, PostgreSQL 11-15, Amazon RDS, Aurora
 
-## Quick Start
+### 💡 Use Cases
 
-1. **Clone and prepare configuration:**
-   ```bash
-   cd aws-db-monitoring-automation
-   
-   # Copy and edit Terraform variables
-   cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-   
-   # Copy and edit database configuration
-   cp config/databases.example.yml config/databases.yml
-   ```
+- **Enterprise Fleet Monitoring**: Deploy consistent monitoring across your entire database infrastructure
+- **DevOps Automation**: Integrate database monitoring into your CI/CD pipelines
+- **Migration Projects**: Monitor performance during database migrations
+- **Compliance Requirements**: Track access patterns and performance for audit requirements
 
-2. **Edit configuration files:**
-   - `terraform/terraform.tfvars`: Set your AWS region, VPC ID, subnet ID, SSH key name, and New Relic credentials
-   - `config/databases.yml`: Add your New Relic license key and MySQL/PostgreSQL database details
+## 📋 Prerequisites
 
-3. **Run the deployment:**
-   ```bash
-   ./scripts/deploy-monitoring.sh -k ~/.ssh/your-key.pem
-   ```
+- AWS Account with appropriate IAM permissions
+- New Relic account with Infrastructure Pro subscription
+- Existing VPC and subnet infrastructure
+- Basic knowledge of Terraform and Ansible
 
-## Configuration
+## 🏃 Quick Start
 
-### Terraform Variables (terraform.tfvars)
-
-```hcl
-aws_region              = "us-east-1"
-instance_type           = "t3.medium"
-key_name               = "your-ssh-key-name"
-vpc_id                 = "vpc-xxxxxxxxx"
-subnet_id              = "subnet-xxxxxxxxx"
-monitoring_server_name = "db-monitoring-server"
-allowed_ssh_cidr_blocks = ["10.0.0.0/8"]
-newrelic_license_key   = "your-newrelic-license-key"
-newrelic_account_id    = "your-newrelic-account-id"
-newrelic_region        = "US"  # or "EU"
-```
-
-### Database Configuration (databases.yml)
-
-The database configuration file supports the following parameters:
-
-**MySQL Integration:**
-- `host`: Database hostname or IP
-- `port`: Database port (default: 3306)
-- `user`: Monitoring user username
-- `password`: Monitoring user password
-- `service_name`: Custom name for the service in New Relic
-- `extended_metrics`: Enable extended metrics collection (true/false)
-- `custom_labels`: Additional labels for categorization
-- `tls_enabled`: Enable TLS connection (true/false)
-- `interval`: Metrics collection interval (default: 30s)
-
-**PostgreSQL Integration:**
-- `host`: Database hostname or IP
-- `port`: Database port (default: 5432)
-- `user`: Monitoring user username
-- `password`: Monitoring user password
-- `database`: Database name to connect to
-- `service_name`: Custom name for the service in New Relic
-- `sslmode`: SSL mode (disable, require, verify-ca, verify-full)
-- `collect_bloat_metrics`: Collect table bloat metrics (true/false)
-- `collect_db_lock_metrics`: Collect database lock metrics (true/false)
-- `custom_labels`: Additional labels for categorization
-- `interval`: Metrics collection interval (default: 30s)
-
-### Deployment Script Options
+Get monitoring deployed in under 10 minutes:
 
 ```bash
-./scripts/deploy-monitoring.sh [OPTIONS]
+# Clone the repository
+git clone https://github.com/newrelic/aws-db-monitoring-automation.git
+cd aws-db-monitoring-automation
 
-OPTIONS:
-    -k, --ssh-key PATH          Path to SSH private key for instance access
-    -c, --config PATH           Path to database configuration file
-    -i, --inventory PATH        Path to Ansible inventory file
-    --skip-terraform            Skip Terraform deployment (use existing instance)
-    --skip-ansible              Skip Ansible configuration
-    -h, --help                  Display help message
+# Configure your environment
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+cp config/databases.example.yml config/databases.yml
+
+# Edit configurations with your values
+nano terraform/terraform.tfvars
+nano config/databases.yml
+
+# Deploy!
+./scripts/deploy-monitoring.sh -k ~/.ssh/your-aws-key.pem
 ```
 
-## Usage Examples
+See the [Quick Start Guide](QUICK_START.md) for detailed instructions.
 
-### Full Deployment
-```bash
-./scripts/deploy-monitoring.sh -k ~/.ssh/production-key.pem
+## 🏗️ Architecture
+
+This solution deploys a monitoring infrastructure that includes:
+
+- **EC2 Monitoring Instance**: Hosts the New Relic Infrastructure agent and database integrations
+- **Security Groups**: Network isolation with least-privilege access
+- **IAM Roles**: Secure credential management without long-lived keys
+- **New Relic Integrations**: MySQL and PostgreSQL monitoring with query performance insights
+
+<details>
+<summary>View Architecture Diagram</summary>
+
 ```
-
-### Using Existing Infrastructure
-```bash
-# Create inventory file manually
-cat > ansible/inventory/hosts.yml << EOF
-all:
-  hosts:
-    monitoring_server:
-      ansible_host: 10.0.1.100
-      ansible_user: ec2-user
-      ansible_ssh_private_key_file: ~/.ssh/production-key.pem
-EOF
-
-# Run only Ansible configuration
-./scripts/deploy-monitoring.sh \
-  -k ~/.ssh/production-key.pem \
-  --skip-terraform
+┌─────────────────────────────────────────┐
+│          New Relic One Platform          │
+│  ┌─────────┐ ┌──────────┐ ┌──────────┐ │
+│  │ Dashboards││ Alerts   ││ Insights  │ │
+│  └─────────┘ └──────────┘ └──────────┘ │
+└────────────────────┬────────────────────┘
+                     │ HTTPS
+        ┌────────────┴────────────┐
+        │   Monitoring Instance   │
+        │  ┌─────────────────┐   │
+        │  │ NR Infra Agent  │   │
+        │  │ + DB Integrations│   │
+        │  └────────┬────────┘   │
+        └───────────┼─────────────┘
+                    │
+     ┌──────────────┴──────────────┐
+     │                             │
+┌────┴────┐                 ┌─────┴────┐
+│ MySQL   │                 │PostgreSQL│
+│Databases│                 │Databases │
+└─────────┘                 └──────────┘
 ```
+</details>
 
-### Manual Database Integration Setup
-After deployment, you can manually add or modify database integrations:
+## 📊 What Gets Monitored?
 
-```bash
-# SSH into the monitoring server
-ssh -i ~/.ssh/your-key.pem ec2-user@<instance-ip>
+### Infrastructure Metrics
+- CPU, Memory, Disk, Network utilization
+- Process monitoring
+- System events and logs
 
-# Edit MySQL configuration
-sudo vi /etc/newrelic-infra/integrations.d/mysql-config.yml
+### Database Metrics
 
-# Edit PostgreSQL configuration
-sudo vi /etc/newrelic-infra/integrations.d/postgresql-config.yml
+<table>
+<tr>
+<td>
 
-# Restart New Relic agent
-sudo systemctl restart newrelic-infra
-```
+**MySQL**
+- Connection statistics
+- Query performance (via Performance Schema)
+- InnoDB metrics
+- Replication status
+- Lock contention
+- Buffer pool efficiency
+- Table and index statistics
 
-## Security Considerations
+</td>
+<td>
 
-1. **Database Credentials**: 
-   - Store sensitive passwords in Ansible Vault: `ansible-vault encrypt config/databases.yml`
-   - Or use AWS Secrets Manager/Parameter Store
-   
-2. **Network Security**: 
-   - Ensure security groups allow database connections from monitoring server
-   - Use TLS/SSL for all database connections when possible
-   
-3. **New Relic License Key**: 
-   - Keep your license key secure
-   - Never commit it to version control
+**PostgreSQL**
+- Connection and transaction rates
+- Query performance (via pg_stat_statements)
+- Cache hit ratios
+- Vacuum and autovacuum metrics
+- Lock statistics
+- Index usage and efficiency
+- Replication lag
 
-## Database User Permissions
+</td>
+</tr>
+</table>
 
-### MySQL
-For basic monitoring:
-```sql
-CREATE USER 'newrelic'@'%' IDENTIFIED BY 'secure_password';
-GRANT SELECT, PROCESS, REPLICATION CLIENT ON *.* TO 'newrelic'@'%';
-```
+### Query Performance Insights
+- Top slow queries with execution plans
+- Wait event analysis
+- Query frequency and patterns
+- Resource consumption per query
+- Historical query performance trends
 
-For query performance monitoring (recommended):
-```sql
--- Grant additional permissions for performance schema
-GRANT SELECT ON performance_schema.* TO 'newrelic'@'%';
-GRANT SELECT ON information_schema.* TO 'newrelic'@'%';
+## 🛠️ Configuration
 
--- Run the setup script for full configuration
-mysql < scripts/setup-mysql-monitoring.sql
-```
-
-### PostgreSQL
-For basic monitoring:
-```sql
-CREATE USER newrelic WITH PASSWORD 'secure_password';
-GRANT SELECT ON pg_stat_database TO newrelic;
-GRANT SELECT ON pg_stat_database_conflicts TO newrelic;
-GRANT SELECT ON pg_stat_bgwriter TO newrelic;
-```
-
-For query performance monitoring (recommended):
-```sql
--- Enable pg_stat_statements extension
-CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
-
--- Grant query monitoring permissions
-GRANT pg_read_all_stats TO newrelic;
-
--- Run the setup script for full configuration
-psql -f scripts/setup-postgresql-monitoring.sql
-```
-
-## Monitoring in New Relic
-
-Once deployed, you can view your database metrics in New Relic:
-
-1. **Infrastructure**: https://one.newrelic.com/infrastructure
-2. **Databases**: https://one.newrelic.com/infrastructure/databases
-3. **Query Performance**: Available in the database entity views
-
-### Query Performance Monitoring Features
-
-With query performance monitoring enabled, you'll have access to:
-
-#### PostgreSQL
-- **Top Slow Queries**: Identify queries consuming the most time
-- **Query Wait Events**: Understand what queries are waiting for
-- **Long Running Queries**: Track queries exceeding time thresholds
-- **Table Bloat Analysis**: Monitor table and index bloat
-- **Index Usage Statistics**: Find unused or rarely used indexes
-
-#### MySQL
-- **Query Digest Analysis**: See normalized queries with execution statistics
-- **Wait Event Monitoring**: Track current wait events across connections
-- **Long Running Query Detection**: Identify stuck or slow queries
-- **Table Statistics**: Monitor table sizes and fragmentation
-- **Lock Wait Analysis**: Understand lock contention issues
-
-### Configuring Query Monitoring
-
-Query monitoring is enabled by default when you use this automation. To customize:
+### Basic Configuration
 
 ```yaml
-# In your databases.yml configuration
+# config/databases.yml
+newrelic_license_key: "YOUR_LICENSE_KEY"
+newrelic_account_id: "YOUR_ACCOUNT_ID"
+
 mysql_databases:
-  - host: your-mysql-host
-    # ... other settings ...
-    enable_query_monitoring: true      # Enable/disable query monitoring
-    query_metrics_interval: 60s        # How often to collect query metrics
-    max_sql_query_length: 1000         # Maximum query text length to capture
-    gather_query_samples: true         # Collect actual query samples
+  - host: mysql-prod.example.com
+    port: 3306
+    user: newrelic
+    password: "secure_password"
+    enable_query_monitoring: true
+    custom_labels:
+      environment: production
+      team: platform
 
 postgresql_databases:
-  - host: your-postgres-host
-    # ... other settings ...
-    enable_query_monitoring: true      # Enable/disable query monitoring
-    query_metrics_interval: 60s        # How often to collect query metrics
-    max_sql_query_length: 1000         # Maximum query text length to capture
-    # custom_metrics_query_file: /path/to/custom-queries.yml  # Optional: custom queries
+  - host: postgres-prod.example.com
+    port: 5432
+    user: newrelic
+    password: "secure_password"
+    database: postgres
+    enable_query_monitoring: true
+    sslmode: require
 ```
 
-## Troubleshooting
+### Advanced Features
 
-1. **Agent Connection Issues**:
-   ```bash
-   # Check agent status
-   sudo systemctl status newrelic-infra
-   
-   # View agent logs
-   sudo journalctl -u newrelic-infra -f
-   
-   # Test connectivity to New Relic
-   curl -I https://infrastructure-api.newrelic.com/
-   ```
+- **Custom Metrics**: Define business-specific queries
+- **Label Strategy**: Organize resources with custom labels
+- **Collection Intervals**: Optimize for your workload
+- **SSL/TLS**: Secure database connections
 
-2. **Database Connection Issues**:
-   ```bash
-   # Check integration configuration
-   sudo cat /etc/newrelic-infra/integrations.d/mysql-config.yml
-   sudo cat /etc/newrelic-infra/integrations.d/postgresql-config.yml
-   
-   # Test database connectivity
-   mysql -h <host> -u <user> -p
-   psql -h <host> -U <user> -d <database>
-   ```
+See [Configuration Guide](docs/CONFIGURATION.md) for all options.
 
-3. **Missing Metrics**:
-   - Verify database user permissions
-   - Check security groups allow connections
-   - Ensure integration interval is appropriate
-   - Review agent logs for errors
+## 🧪 Testing
 
-4. **Query Performance Metrics Not Showing**:
-   
-   **PostgreSQL:**
-   - Verify pg_stat_statements extension is enabled: `SELECT * FROM pg_extension WHERE extname = 'pg_stat_statements';`
-   - Check user has pg_read_all_stats role: `SELECT rolname FROM pg_roles WHERE pg_has_role('newrelic', oid, 'member');`
-   - Ensure postgresql.conf has: `shared_preload_libraries = 'pg_stat_statements'`
-   - Restart PostgreSQL after configuration changes
-   
-   **MySQL:**
-   - Verify performance_schema is enabled: `SHOW VARIABLES LIKE 'performance_schema';`
-   - Check statement consumers: `SELECT * FROM performance_schema.setup_consumers WHERE NAME LIKE '%statement%';`
-   - Ensure user has performance_schema access: `SHOW GRANTS FOR 'newrelic'@'%';`
-   - MySQL 8.0+ required for full query monitoring support
-
-## Clean Up
-
-To remove all created resources:
+This project includes comprehensive testing with LocalStack:
 
 ```bash
-cd terraform/
-terraform destroy
-```
-
-## Testing with LocalStack
-
-This project includes a comprehensive testing setup using LocalStack to simulate AWS services locally.
-
-### Quick Start Testing
-
-```bash
-# Start test environment
+# Start local test environment
 make start
 
 # Run all tests
@@ -339,60 +203,68 @@ make test-e2e
 make stop
 ```
 
-### Test Environment Components
+See [Testing Guide](TESTING.md) for detailed information.
 
-1. **LocalStack**: Simulates AWS services (EC2, VPC, Security Groups)
-2. **MySQL Container**: Test MySQL database with sample data
-3. **PostgreSQL Container**: Test PostgreSQL database with sample data
-4. **Mock New Relic API**: Simulates New Relic endpoints for testing
-5. **Test Runner**: Container with all testing tools pre-installed
+## 📚 Documentation
 
-### Running Tests Manually
+- 📖 [Quick Start Guide](QUICK_START.md) - Get up and running quickly
+- 🏛️ [Architecture Overview](docs/ARCHITECTURE.md) - Deep dive into the solution design
+- 🔐 [Best Practices](docs/BEST_PRACTICES.md) - Security, performance, and operational guidance
+- 🔧 [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and solutions
+- 🧪 [Testing Guide](TESTING.md) - Comprehensive testing documentation
+- 📊 [Dashboard Templates](docs/DASHBOARDS.md) - Pre-built New Relic dashboards
+- 🚨 [Alerting Guide](docs/ALERTING.md) - Alert policy recommendations
 
-```bash
-# Start all services
-docker-compose up -d
+## 🤝 Contributing
 
-# Run tests inside the test container
-docker-compose exec test-runner /usr/local/bin/run-tests.sh all
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details on:
 
-# View logs
-docker-compose logs -f
+- Code of Conduct
+- Development setup
+- Submitting pull requests
+- Style guidelines
 
-# Clean up
-docker-compose down -v
-```
+## 🆘 Support
 
-### Test Configuration
+### Community Support
 
-For testing, use the LocalStack configuration:
-```bash
-cd terraform
-terraform init
-terraform plan -var-file=terraform.localstack.tfvars
-terraform apply -var-file=terraform.localstack.tfvars
-```
+- 💬 [New Relic Explorers Hub](https://discuss.newrelic.com) - Community forum
+- 📺 [Video Tutorials](https://youtube.com/newrelic) - YouTube channel
+- 📚 [Documentation](https://docs.newrelic.com) - Official docs
 
-### CI/CD Pipeline
+### Commercial Support
 
-The project includes GitHub Actions workflows for:
-- Linting and validation
-- Unit tests
-- Integration tests
-- End-to-end tests
-- Security scanning
-- Automated releases
+- 🎫 [Support Portal](https://support.newrelic.com) - For customers with support plans
+- 📧 [Contact Sales](https://newrelic.com/contact-sales) - For licensing questions
 
-### Development Workflow
+### Reporting Issues
 
-1. Make changes to code
-2. Run tests locally: `make test`
-3. Fix any issues
-4. Commit and push
-5. CI/CD pipeline runs automatically
+Found a bug? Have a feature request?
 
-## Support
+1. Check [existing issues](https://github.com/newrelic/aws-db-monitoring-automation/issues)
+2. Create a [new issue](https://github.com/newrelic/aws-db-monitoring-automation/issues/new) with:
+   - Clear description
+   - Steps to reproduce
+   - Expected vs actual behavior
+   - Environment details
 
-For New Relic specific issues:
-- Documentation: https://docs.newrelic.com/docs/infrastructure/
-- Support: https://support.newrelic.com/
+## 📜 License
+
+This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- New Relic Infrastructure team
+- New Relic Database monitoring team
+- Open source community contributors
+- All our users and testers
+
+---
+
+<div align="center">
+  <b>Built with ❤️ by the New Relic team</b>
+  <br>
+  <a href="https://newrelic.com">newrelic.com</a> • 
+  <a href="https://twitter.com/newrelic">@newrelic</a> • 
+  <a href="https://github.com/newrelic">GitHub</a>
+</div>

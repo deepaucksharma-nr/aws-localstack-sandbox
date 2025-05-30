@@ -1,51 +1,132 @@
 -- MySQL initialization script for testing
--- Grant permissions to New Relic monitoring user
+-- Sets up test database with proper permissions for New Relic monitoring
+
+-- Create test databases
+CREATE DATABASE IF NOT EXISTS testdb;
+CREATE DATABASE IF NOT EXISTS analytics;
+
+-- Create monitoring user with proper permissions
+CREATE USER IF NOT EXISTS 'newrelic'@'%' IDENTIFIED BY 'newrelic123';
+
+-- Grant basic monitoring permissions
 GRANT SELECT, PROCESS, REPLICATION CLIENT ON *.* TO 'newrelic'@'%';
-FLUSH PRIVILEGES;
 
--- Create test database and tables
-CREATE DATABASE IF NOT EXISTS app_db;
-USE app_db;
+-- Grant performance schema permissions for query monitoring
+GRANT SELECT ON performance_schema.* TO 'newrelic'@'%';
+GRANT SELECT ON information_schema.* TO 'newrelic'@'%';
+GRANT SELECT ON mysql.user TO 'newrelic'@'%';
 
-CREATE TABLE users (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    username VARCHAR(50) NOT NULL,
-    email VARCHAR(100) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_username (username),
-    INDEX idx_email (email)
+-- Enable performance schema consumers for query monitoring
+UPDATE performance_schema.setup_consumers 
+SET ENABLED = 'YES' 
+WHERE NAME IN (
+    'events_statements_current',
+    'events_statements_history',
+    'events_statements_history_long',
+    'events_waits_current',
+    'events_waits_history',
+    'events_waits_history_long'
 );
 
-CREATE TABLE orders (
-    id INT PRIMARY KEY AUTO_INCREMENT,
+-- Enable statement instrumentation
+UPDATE performance_schema.setup_instruments 
+SET ENABLED = 'YES', TIMED = 'YES' 
+WHERE NAME LIKE 'statement/%';
+
+-- Enable wait instrumentation for query analysis
+UPDATE performance_schema.setup_instruments 
+SET ENABLED = 'YES', TIMED = 'YES' 
+WHERE NAME LIKE 'wait/io/file/%' 
+   OR NAME LIKE 'wait/io/table/%' 
+   OR NAME LIKE 'wait/lock/table/%';
+
+-- Create test tables
+USE testdb;
+
+CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    email VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_email (email),
+    INDEX idx_created (created_at)
+);
+
+CREATE TABLE IF NOT EXISTS orders (
+    id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
     order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    total_amount DECIMAL(10,2),
-    status VARCHAR(20) DEFAULT 'pending',
+    total_amount DECIMAL(10, 2) NOT NULL,
+    status ENUM('pending', 'processing', 'completed', 'cancelled') DEFAULT 'pending',
     FOREIGN KEY (user_id) REFERENCES users(id),
-    INDEX idx_user_id (user_id),
+    INDEX idx_user_date (user_id, order_date),
     INDEX idx_status (status)
+);
+
+CREATE TABLE IF NOT EXISTS products (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    price DECIMAL(10, 2) NOT NULL,
+    stock_quantity INT DEFAULT 0,
+    category VARCHAR(50),
+    INDEX idx_category (category),
+    INDEX idx_price (price)
 );
 
 -- Insert test data
 INSERT INTO users (username, email) VALUES
-    ('testuser1', 'test1@example.com'),
-    ('testuser2', 'test2@example.com'),
-    ('testuser3', 'test3@example.com');
+    ('testuser1', 'user1@example.com'),
+    ('testuser2', 'user2@example.com'),
+    ('testuser3', 'user3@example.com');
+
+INSERT INTO products (name, price, stock_quantity, category) VALUES
+    ('Product A', 19.99, 100, 'Electronics'),
+    ('Product B', 29.99, 50, 'Electronics'),
+    ('Product C', 9.99, 200, 'Books'),
+    ('Product D', 49.99, 25, 'Electronics');
 
 INSERT INTO orders (user_id, total_amount, status) VALUES
-    (1, 100.50, 'completed'),
-    (2, 250.75, 'pending'),
-    (1, 75.25, 'completed'),
-    (3, 300.00, 'processing');
+    (1, 49.98, 'completed'),
+    (2, 29.99, 'processing'),
+    (1, 9.99, 'completed'),
+    (3, 69.98, 'pending');
 
 -- Create some slow queries for testing
 DELIMITER //
-CREATE PROCEDURE generate_slow_query()
+
+CREATE PROCEDURE generate_test_load()
 BEGIN
-    SELECT SLEEP(2);
-    SELECT COUNT(*) FROM users u1 
-    CROSS JOIN users u2 
-    CROSS JOIN users u3;
+    DECLARE i INT DEFAULT 0;
+    WHILE i < 100 DO
+        -- Simulate various query patterns
+        SELECT COUNT(*) FROM users WHERE created_at > DATE_SUB(NOW(), INTERVAL i DAY);
+        SELECT AVG(total_amount) FROM orders WHERE status = 'completed';
+        SELECT p.name, COUNT(o.id) as order_count 
+        FROM products p 
+        LEFT JOIN orders o ON p.id = o.user_id 
+        GROUP BY p.name;
+        
+        SET i = i + 1;
+    END WHILE;
 END//
+
 DELIMITER ;
+
+-- Analytics database setup
+USE analytics;
+
+CREATE TABLE IF NOT EXISTS events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    event_type VARCHAR(50) NOT NULL,
+    user_id INT,
+    event_data JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_type_time (event_type, created_at)
+) ENGINE=InnoDB;
+
+-- Apply privileges
+FLUSH PRIVILEGES;
+
+-- Display setup confirmation
+SELECT 'MySQL test database initialized successfully!' as status;

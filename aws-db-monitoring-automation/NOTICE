@@ -1,0 +1,39 @@
+New Relic Database Monitoring Automation
+Copyright 2024 New Relic, Inc.
+
+This product includes software developed at New Relic, Inc.
+(https://newrelic.com/).
+
+================================================================
+
+This product includes software developed by the Terraform Community
+(https://www.terraform.io/)
+
+This product includes software developed by the Ansible Community
+(https://www.ansible.com/)
+
+================================================================
+
+Third-party libraries and dependencies are subject to their own licenses.
+See the accompanying LICENSE files in the respective directories or 
+refer to the dependency management files:
+
+- terraform/versions.tf for Terraform provider dependencies
+- test/requirements.txt for Python testing dependencies
+- mock-services/package.json for Node.js dependencies
+
+================================================================
+
+New Relic, the New Relic logo, and other New Relic marks are trademarks 
+or registered trademarks of New Relic, Inc. or its subsidiaries in the 
+United States and other countries.
+
+All other trademarks are the property of their respective owners.
+
+================================================================
+
+For more information:
+- Visit: https://newrelic.com
+- Documentation: https://docs.newrelic.com
+- Support: https://support.newrelic.com
+- Community: https://discuss.newrelic.com
