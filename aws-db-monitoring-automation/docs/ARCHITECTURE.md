@@ -5,7 +5,7 @@
 ## LocalStack-Powered Automation
 
 ```
-LocalStack Testing → Terraform Automation → Ansible Configuration → Production Ready
+LocalStack Env → Terraform Automation → Ansible Configuration → Production Ready
 ```
 
 ### 2. Infrastructure as Code with Terraform
